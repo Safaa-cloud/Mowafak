@@ -1,0 +1,13 @@
+langgraph
+langchain
+langchain-google-genai
+openai-whisper
+chainlit
+fastapi
+uvicorn
+pydantic
+pypdf
+python-multipart
+deepeval
+structlog
+python-dotenv
