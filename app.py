@@ -1,50 +1,42 @@
 import chainlit as cl
 import sqlite3
 import os
-import json
-import csv
-from datetime import datetime
+from src.audit_log import log_decision, export_log_to_csv
 
 # ==========================================
-# Database & Utility Functions
+# 1. Database & Utility Functions
 # ==========================================
 
-def get_db_connection():
+def get_db_connection() -> sqlite3.Connection:
+    """Establish connection to the central database."""
     current_dir = os.path.dirname(os.path.abspath(__file__))
     db_path = os.path.join(current_dir, 'data', 'mowafak.db')
+    
+    # Ensure data directory exists
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
     return sqlite3.connect(db_path)
 
-async def process_decision(cand_id, decision, hr_notes="None"):
+async def process_decision(cand_id: str, decision: str, hr_notes: str = "None"):
+    """Handles the backend updates when HR makes a decision."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    # 1. Update Database (Clearing the HiL Gate)
     cursor.execute('UPDATE interviews SET hr_decision = ?, hr_notes = ? WHERE candidate_id = ?', (decision, hr_notes, cand_id))
+    
+    # 2. Fetch AI Recommendation to complete the Audit Log
     cursor.execute('SELECT ai_recommendation FROM interviews WHERE candidate_id = ?', (cand_id,))
     ai_rec_row = cursor.fetchone()
     ai_rec = ai_rec_row[0] if ai_rec_row else "N/A"
 
-    cursor.execute('''
-        INSERT INTO audit_log (candidate_id, ai_recommendation, hr_decision, hr_notes_hash)
-        VALUES (?, ?, ?, ?)
-    ''', (cand_id, ai_rec, decision, hr_notes))
-
     conn.commit()
     conn.close()
 
-    log_entry = {
-        "timestamp": datetime.now().isoformat(),
-        "candidate_id": cand_id,
-        "ai_recommendation": ai_rec,
-        "hr_decision": decision,
-        "hr_notes": hr_notes,
-        "verified_by": "HR_Manager_Mariam"
-    }
-
-    os.makedirs("responsible_ai", exist_ok=True)
-    with open("responsible_ai/audit_log.jsonl", "a", encoding="utf-8") as f:
-        f.write(json.dumps(log_entry) + "\n")
+    # 3. Save to JSONL using your secure Audit Log module
+    log_decision(cand_id, ai_rec, decision, hr_notes)
 
 def format_ai_badge(ai_rec: str) -> str:
+    """Helper to make the UI look professional."""
     badges = {
         "strong_yes": "🟢 Strong Yes",
         "yes": "🟡 Yes",
@@ -54,82 +46,73 @@ def format_ai_badge(ai_rec: str) -> str:
     return badges.get(ai_rec, f"🤖 {ai_rec.replace('_', ' ').title()}")
 
 # ==========================================
-# UI & Chainlit Logic
+# 2. UI Initialization & Dashboard
 # ==========================================
 
 @cl.on_chat_start
 async def start():
-    await cl.Message(content="👋 **Mowafak HR Gateway Active.** Type `/export` anytime to download the Audit Log CSV.").send()
+    """Initializes the HR Dashboard when the browser loads."""
+    await cl.Message(content="👋 **Mowafak HR Gateway Active.** \n*Type `/export` anytime to download the secure Audit Log CSV.*").send()
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT c.id, c.name, i.ai_recommendation, q.evaluation_score, q.question_text, q.transcript, q.evaluation_evidence
-        FROM candidates c
-        JOIN interviews i ON c.id = i.candidate_id
-        LEFT JOIN interview_questions q ON i.id = q.interview_id
-        WHERE i.hr_decision = 'Pending'
-        LIMIT 1
-    ''')
-    row = cursor.fetchone()
-    conn.close()
-
-    if not row:
-        await cl.Message(content="📭 No candidates pending review. All applications processed.").send()
-        return
-
-    cand_id, name, ai_rec, score, question, transcript, evidence = row
-    report_content = f"""## 📊 Candidate Assessment Panel
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
         
+        # Fetch ONE pending candidate to review
+        cursor.execute('''
+            SELECT c.id, c.name, i.ai_recommendation, q.evaluation_score, q.question_text, q.transcript, q.evaluation_evidence
+            FROM candidates c
+            JOIN interviews i ON c.id = i.candidate_id
+            LEFT JOIN interview_questions q ON i.id = q.interview_id
+            WHERE i.hr_decision = 'Pending' OR i.hr_decision IS NULL
+            LIMIT 1
+        ''')
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            await cl.Message(content="📭 **No candidates pending review.** All applications have been processed.").send()
+            return
+
+        cand_id, name, ai_rec, score, question, transcript, evidence = row
+
+        # Build the Markdown Report for the UI
+        report_content = f"""## 📊 Candidate Assessment Panel
+            
 | 👤 Profile Details | 📈 Assessment Results |
 | :--- | :--- |
-| **Name:** {name} <br> **ID:** `{cand_id}` | **Score:** ⭐ {score}/5 <br> **AI Rec:** {format_ai_badge(ai_rec)} |
+| **Name:** {name} <br> **ID:** `{cand_id}` | **Score:** ⭐ {score if score else 'N/A'}/5 <br> **AI Rec:** {format_ai_badge(ai_rec if ai_rec else 'pending')} |
 
 ---
 ### 🎙️ Interview Transcript & Evidence
-**Question:** *"{question if question else 'N/A'}"*
+**Question:** *"{question if question else 'No question recorded.'}"*
 
 **Candidate Response:** > "{transcript if transcript else 'No audio transcript found.'}"
 
 **AI Evidence for Score:** > "*{evidence if evidence else 'No specific evidence quoted by AI.'}*"
 
 ---
-> 🛡️ **Final HR Approval (HiL Gate):** *The AI screening is complete. Awaiting final human confirmation to finalize the status.*
+> 🛡️ **Final HR Approval (HiL Gate):** *The AI screening is complete. Awaiting final human confirmation to finalize the status. No candidate is rejected automatically.*
 """
 
-    actions = [
-        cl.Action(name="approve", payload={"value": cand_id, "status": "Approved"}, label="✅ Approve"),
-        cl.Action(name="hold", payload={"value": cand_id, "status": "Hold"}, label="⏳ Hold"),
-        cl.Action(name="reject", payload={"value": cand_id, "status": "Rejected"}, label="❌ Reject with Feedback"),
-    ]
+        # Interactive Buttons for the HR Manager
+        actions = [
+            cl.Action(name="approve", payload={"value": cand_id, "status": "Approved"}, label="✅ Approve"),
+            cl.Action(name="hold", payload={"value": cand_id, "status": "Hold"}, label="⏳ Hold"),
+            cl.Action(name="reject", payload={"value": cand_id, "status": "Rejected"}, label="❌ Reject with Feedback"),
+        ]
 
-    msg = cl.Message(content=report_content, actions=actions)
-    await msg.send()
-    cl.user_session.set("report_msg", msg)
-
-@cl.on_message
-async def handle_commands(message: cl.Message):
-    if message.content.strip().lower() == "/export":
-        log_file = "responsible_ai/audit_log.jsonl"
-        csv_file = "responsible_ai/audit_export.csv"
+        msg = cl.Message(content=report_content, actions=actions)
+        await msg.send()
         
-        if os.path.exists(log_file):
-            with open(log_file, 'r', encoding="utf-8") as f_in, open(csv_file, 'w', newline='', encoding="utf-8") as f_out:
-                writer = None
-                for line in f_in:
-                    data = json.loads(line)
-                    if not writer:
-                        writer = csv.DictWriter(f_out, fieldnames=data.keys())
-                        writer.writeheader()
-                    writer.writerow(data)
-            
-            await cl.Message(content="📊 Audit Log exported successfully:").send()
-            await cl.File(path=csv_file, name="audit_log_export.csv").send()
-        else:
-            await cl.Message(content="❌ No audit logs found to export.").send()
+        # Store the message in session to remove buttons later
+        cl.user_session.set("report_msg", msg)
+
+    except Exception as e:
+        await cl.Message(content=f"⚠️ Database Error: Please ensure `orchestrator.py` has run at least once to create the tables. ({e})").send()
 
 # ==========================================
-# Action Handlers
+# 3. Action Handlers (Button Clicks)
 # ==========================================
 
 @cl.action_callback("approve")
@@ -142,14 +125,18 @@ async def on_hold(action: cl.Action):
 
 @cl.action_callback("reject")
 async def on_reject(action: cl.Action):
+    # Requirement: Ask for explicit feedback if rejected
     res = await cl.AskUserMessage(content=f"Please provide specific feedback for candidate `{action.payload['value']}` rejection:", timeout=120).send()
     feedback = res['output'] if res else "No specific feedback provided."
     await finalize_decision(action, "Rejected", feedback)
 
-async def finalize_decision(action, status, notes):
+async def finalize_decision(action: cl.Action, status: str, notes: str):
     cand_id = action.payload["value"]
     
+    # Process backend updates
     await process_decision(cand_id, status, notes)
+
+    # Remove buttons so HR can't click twice
     msg = cl.user_session.get("report_msg")
     if msg:
         await msg.remove_actions()
@@ -161,6 +148,33 @@ async def finalize_decision(action, status, notes):
         content=(
             f"{icon} **Decision Finalized: {status}** \n"
             f"Candidate `{cand_id}` has been marked as **{status}**.  \n"
-            f"*All records successfully updated in the Database and Audit Log.*"
+            f"*All records successfully updated in the Database and securely logged in the Audit Trail.*"
         )
     ).send()
+
+# ==========================================
+# 4. Command Handlers (e.g., /export)
+# ==========================================
+
+@cl.on_message
+async def handle_commands(message: cl.Message):
+    if message.content.strip().lower() == "/export":
+        csv_file_path = export_log_to_csv()
+        
+        if csv_file_path and os.path.exists(csv_file_path):
+            # FIXED: Read file into memory as bytes to avoid Chainlit absolute path UI bugs
+            with open(csv_file_path, "rb") as f:
+                file_data = f.read()
+                
+            export_file = cl.File(
+                content=file_data, 
+                name="audit_log_export.csv", 
+                mime="text/csv"
+            )
+            
+            await cl.Message(
+                content="📊 **Audit Log exported successfully!** Click the file below to download it:", 
+                elements=[export_file]
+            ).send()
+        else:
+            await cl.Message(content="❌ No audit logs found to export.").send()
