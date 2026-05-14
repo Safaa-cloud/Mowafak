@@ -1,25 +1,30 @@
 import os
 import sqlite3
+import logging
 from typing import TypedDict, List
 from langgraph.graph import StateGraph, END
 
-# Importing the AI modules we've reviewed and fixed
-from src.agents.cv_parser import parse_cv, extract_text_from_pdf
-from src.agents.question_generator import GenerateQuestions, SkillsMatrix
+# Synchronized imports from your agents
+from src.agents.cv_parser import parse_cv, extract_text_from_pdf, CVData
+from src.agents.question_generator import generate_questions, SkillsMatrix
 from src.agents.response_evaluator import evaluate_response
 from src.agents.report_generator import generate_report
+
+logger = logging.getLogger(__name__)
+
 # ==========================================
 # 1. Define the Graph State
 # ==========================================
 class InterviewState(TypedDict):
     """Represents the system state at any point in the pipeline."""
     candidate_id: str
+    session_id: str  # Added to match backend session tracking
     cv_path: str
     skills_matrix: dict
     cv_data: dict
     questions: List[str]
-    transcripts: List[str]  # Whisper outputs (from the Audio Engineer)
-    assessments: List[dict] # Evaluation results for each question
+    transcripts: List[str]  # Whisper outputs
+    assessments: List[any]  # Evaluation results (Pydantic objects)
     final_report: dict
     status: str
 
@@ -32,14 +37,17 @@ def parsing_node(state: InterviewState):
     print("--- STEP 1: PARSING CV ---")
     raw_text = extract_text_from_pdf(state['cv_path'])
     cv_results = parse_cv(raw_text)
-    return {"cv_data": cv_results}
+    # Store as dict for state serializability
+    return {"cv_data": cv_results.model_dump() if cv_results else {}}
 
 def question_generation_node(state: InterviewState):
     """Step 2: Generate tailored questions based on the parsed CV."""
     print("--- STEP 2: GENERATING QUESTIONS ---")
     matrix = SkillsMatrix(**state['skills_matrix'])
-    questions_obj = GenerateQuestions(state['cv_data'], matrix)
-    return {"questions": questions_obj.questions}
+    # Reconstruct CVData for the agent
+    cv_data_obj = CVData(**state['cv_data'])
+    questions_obj = generate_questions(cv_data_obj, matrix)
+    return {"questions": questions_obj.questions if questions_obj else []}
 
 def evaluation_node(state: InterviewState):
     """Step 3: Evaluate each answer transcript against its question."""
@@ -47,14 +55,14 @@ def evaluation_node(state: InterviewState):
     results = []
     matrix = SkillsMatrix(**state['skills_matrix'])
     
-    # Evaluate each transcript provided by the Audio module
     for i, transcript in enumerate(state['transcripts']):
-        eval_res = evaluate_response(
-            transcript=transcript,
-            skill_matrix=matrix,
-            original_question=state['questions'][i]
-        )
-        results.append(eval_res.dict())
+        if i < len(state['questions']):
+            eval_res = evaluate_response(
+                transcript=transcript,
+                skill_matrix=matrix,
+                original_question=state['questions'][i]
+            )
+            results.append(eval_res) # Keep as object for the reporter
     
     return {"assessments": results}
 
@@ -64,29 +72,31 @@ def report_generation_node(state: InterviewState):
     matrix = SkillsMatrix(**state['skills_matrix'])
     report = generate_report(state['assessments'], matrix)
     
-    # Sync the AI results with the database for the HR UI (app.py)
-    save_to_db(state['candidate_id'], report)
-    
-    return {"final_report": report.dict(), "status": "Awaiting HR"}
+    if report:
+        # Sync with the 'reports' table for the HR UI
+        save_to_db(state['session_id'], report)
+        return {"final_report": report.model_dump(), "status": "Awaiting HR"}
+    return {"status": "Failed"}
 
 # ==========================================
 # 3. Database Helper
 # ==========================================
-def save_to_db(cand_id, report):
-    """Saves AI findings to mowafak.db so the HR dashboard can see them."""
+def save_to_db(session_id, report):
+    """Saves AI findings to the reports table used by app.py."""
     db_path = os.path.join(os.getcwd(), 'data', 'mowafak.db')
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
+    # Updated to match the backend/main.py schema
     cursor.execute('''
-        UPDATE interviews 
-        SET ai_recommendation = ?, ai_score = ?
-        WHERE candidate_id = ?
-    ''', (report.recommendation, report.overall_score, cand_id))
+        UPDATE reports 
+        SET report_json = ?, ai_recommendation = ?
+        WHERE session_id = ?
+    ''', (report.model_dump_json(), report.recommendation, session_id))
     
     conn.commit()
     conn.close()
-    print(f"✅ Data saved for Candidate {cand_id}. Ready for HR review.")
+    print(f"✅ AI Report saved for Session {session_id}. Ready for HR review.")
 
 # ==========================================
 # 4. Build the Graph

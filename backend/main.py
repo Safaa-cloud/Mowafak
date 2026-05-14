@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+import asyncio
 import sqlite3
 import shutil
 import hashlib
@@ -18,29 +19,28 @@ from typing import Optional
 sys.path.append(str(Path(__file__).parent.parent))
 
 from src.settings import settings
+from src.whisper_stt import transcribe_audio as real_whisper_transcribe
 
 
 # =============================================================================
 # CONSTANTS
 # =============================================================================
 
-MAX_CV_SIZE_MB = 10
+MAX_CV_SIZE_MB    = 10
 MAX_AUDIO_SIZE_MB = 25
 
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".webm", ".mp3", ".m4a"}
-ALLOWED_CV_CONTENT_TYPE = "application/pdf"
+ALLOWED_CV_CONTENT_TYPE  = "application/pdf"
 
 
 # =============================================================================
 # DATABASE HELPERS
 # =============================================================================
 
-
 def get_db_connection():
     conn = sqlite3.connect(settings.DATABASE_URL, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
-
 
 
 def init_db():
@@ -58,7 +58,7 @@ def init_db():
             consent_accepted    INTEGER DEFAULT 0,
             created_at          TEXT
         )
-    """
+        """
     )
 
     cursor.execute(
@@ -70,7 +70,7 @@ def init_db():
             questions_json      TEXT,
             created_at          TEXT
         )
-    """
+        """
     )
 
     cursor.execute(
@@ -79,12 +79,16 @@ def init_db():
             id                  TEXT PRIMARY KEY,
             session_id          TEXT,
             question_index      INTEGER,
+            question_text       TEXT,
             audio_path          TEXT,
             transcript          TEXT,
             created_at          TEXT
         )
-    """
+        """
     )
+
+    # FIX (Bug 3): added question_text column so the evaluator agent always
+    # has the original question alongside the transcript.
 
     cursor.execute(
         """
@@ -98,7 +102,7 @@ def init_db():
             hr_user_id          TEXT,
             decided_at          TEXT
         )
-    """
+        """
     )
 
     conn.commit()
@@ -109,11 +113,9 @@ def init_db():
 # FILE HELPERS
 # =============================================================================
 
-
 def ensure_directories_exist():
     Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
     Path(settings.AUDIT_LOG_PATH).parent.mkdir(parents=True, exist_ok=True)
-
 
 
 def validate_file_size(upload_file: UploadFile, max_size_mb: int):
@@ -121,60 +123,46 @@ def validate_file_size(upload_file: UploadFile, max_size_mb: int):
     file_size = upload_file.file.tell()
     upload_file.file.seek(0)
 
-    max_bytes = max_size_mb * 1024 * 1024
-
-    if file_size > max_bytes:
+    if file_size > max_size_mb * 1024 * 1024:
         raise HTTPException(
             status_code=400,
             detail=f"File exceeds {max_size_mb} MB limit.",
         )
 
 
-
-def validate_audio_extension(filename: str):
+def validate_audio_extension(filename: str) -> str:
     suffix = Path(filename).suffix.lower()
-
     if suffix not in ALLOWED_AUDIO_EXTENSIONS:
         raise HTTPException(
             status_code=400,
             detail="Unsupported audio format.",
         )
-
     return suffix
 
 
 # =============================================================================
-# WHISPER PLACEHOLDER
+# WHISPER WRAPPER
 # =============================================================================
 
-
-def transcribe_audio(audio_path: str) -> str:
-    """
-    Placeholder for Whisper integration.
-
-    Replace with:
-    from src.whisper_stt import transcribe
-    """
-
-    return "Transcript pending Whisper integration"
+def _transcribe_sync(audio_path: str) -> str:
+    """Synchronous wrapper — called via run_in_executor to avoid blocking."""
+    return real_whisper_transcribe(audio_path)
 
 
 # =============================================================================
 # PYDANTIC MODELS
 # =============================================================================
 
-
 class HRDecisionRequest(BaseModel):
     session_id: str
-    decision: str
+    decision:   str
     hr_user_id: str
-    hr_notes: Optional[str] = ""
+    hr_notes:   Optional[str] = ""
 
 
 # =============================================================================
 # APP LIFECYCLE
 # =============================================================================
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -194,12 +182,23 @@ app = FastAPI(
 # CORS
 # =============================================================================
 
+# FIX (Bug 1): original config only listed localhost:8000 (Chainlit).
+# record.html is a static file — when opened via file:// its origin is "null".
+# When served via Live Server or another local server it uses a different port.
+# Added "null" and common dev-server ports so candidate POSTs are not blocked.
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:8000",
         "http://127.0.0.1:8000",
+        "http://localhost:8001",
+        "http://127.0.0.1:8001",
+        "http://localhost:5500",   # VS Code Live Server
+        "http://127.0.0.1:5500",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "null",                    # file:// origin (record.html opened directly)
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -210,7 +209,6 @@ app.add_middleware(
 # =============================================================================
 # HEALTH CHECK
 # =============================================================================
-
 
 @app.get("/health")
 async def health_check():
@@ -224,38 +222,30 @@ async def health_check():
 # UPLOAD CV
 # =============================================================================
 
-
 @app.post("/upload_cv")
 async def upload_cv(
-    file: UploadFile = File(...),
-    name: str = Form(...),
-    email: str = Form(...),
-    consent_accepted: bool = Form(...),
+    file:             UploadFile = File(...),
+    name:             str        = Form(...),
+    email:            str        = Form(...),
+    consent_accepted: bool       = Form(...),
 ):
     if not consent_accepted:
-        raise HTTPException(
-            status_code=400,
-            detail="Candidate consent is required.",
-        )
+        raise HTTPException(status_code=400, detail="Candidate consent is required.")
 
     if file.content_type != ALLOWED_CV_CONTENT_TYPE:
-        raise HTTPException(
-            status_code=400,
-            detail="Only PDF files are accepted.",
-        )
+        raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
     validate_file_size(file, MAX_CV_SIZE_MB)
 
     candidate_id = str(uuid.uuid4())
-    session_id = str(uuid.uuid4())
+    session_id   = str(uuid.uuid4())
 
-    upload_path = Path(settings.UPLOAD_DIR) / f"cv_{candidate_id}.pdf"
+    upload_path  = Path(settings.UPLOAD_DIR) / f"cv_{candidate_id}.pdf"
 
     with open(upload_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    now = datetime.now(timezone.utc).isoformat()
-
+    now  = datetime.now(timezone.utc).isoformat()
     conn = get_db_connection()
 
     try:
@@ -263,56 +253,33 @@ async def upload_cv(
 
         cursor.execute(
             """
-            INSERT INTO candidates (
-                id,
-                name,
-                email,
-                cv_path,
-                session_id,
-                consent_accepted,
-                created_at
-            )
+            INSERT INTO candidates
+                (id, name, email, cv_path, session_id, consent_accepted, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                candidate_id,
-                name,
-                email,
-                str(upload_path),
-                session_id,
-                1,
-                now,
-            ),
+            """,
+            (candidate_id, name, email, str(upload_path), session_id, 1, now),
         )
 
         cursor.execute(
             """
-            INSERT INTO sessions (
-                id,
-                candidate_id,
-                status,
-                created_at
-            )
+            INSERT INTO sessions (id, candidate_id, status, created_at)
             VALUES (?, ?, 'pending', ?)
-        """,
+            """,
             (session_id, candidate_id, now),
         )
 
         conn.commit()
 
     except sqlite3.Error:
-        raise HTTPException(
-            status_code=500,
-            detail="Database operation failed.",
-        )
+        raise HTTPException(status_code=500, detail="Database operation failed.")
 
     finally:
         conn.close()
 
     return {
-        "message": "CV uploaded successfully.",
+        "message":      "CV uploaded successfully.",
         "candidate_id": candidate_id,
-        "session_id": session_id,
+        "session_id":   session_id,
     }
 
 
@@ -320,10 +287,9 @@ async def upload_cv(
 # START INTERVIEW
 # =============================================================================
 
-
 @app.post("/start_interview")
 async def start_interview(
-    session_id: str = Form(...),
+    session_id:     str = Form(...),
     questions_json: str = Form(...),
 ):
     conn = get_db_connection()
@@ -336,38 +302,80 @@ async def start_interview(
             UPDATE sessions
             SET status='in_progress', questions_json=?
             WHERE id=?
-        """,
+            """,
             (questions_json, session_id),
         )
 
         if cursor.rowcount == 0:
-            raise HTTPException(
-                status_code=404,
-                detail="Session not found.",
-            )
+            raise HTTPException(status_code=404, detail="Session not found.")
 
         conn.commit()
 
     finally:
         conn.close()
 
-    return {
-        "message": "Interview started.",
-        "session_id": session_id,
-    }
+    return {"message": "Interview started.", "session_id": session_id}
+
+
+# =============================================================================
+# GET QUESTIONS  (FIX — Bug 2: this endpoint was completely missing)
+# =============================================================================
+
+@app.get("/get_questions")
+async def get_questions(session_id: str):
+    """
+    Returns the AI-generated questions for a session so record.html can
+    display them to the candidate.  The questions are stored as a JSON array
+    in sessions.questions_json by the /start_interview endpoint (or directly
+    by the LangGraph orchestrator).
+    """
+    conn = get_db_connection()
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT questions_json FROM sessions WHERE id=?",
+            (session_id,),
+        )
+        row = cursor.fetchone()
+
+    finally:
+        conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    if not row["questions_json"]:
+        raise HTTPException(
+            status_code=404,
+            detail="Questions not ready yet. Run the orchestrator first.",
+        )
+
+    return {"session_id": session_id, "questions": json.loads(row["questions_json"])}
 
 
 # =============================================================================
 # UPLOAD ANSWER
 # =============================================================================
 
-
 @app.post("/upload_answer")
 async def upload_answer(
-    session_id: str = Form(...),
-    question_index: int = Form(...),
-    audio: UploadFile = File(...),
+    session_id:     str        = Form(...),
+    question_index: int        = Form(...),
+    question_text:  str        = Form(""),   # FIX (Bug 3): was missing, now stored
+    audio:          UploadFile = File(...),
 ):
+    """
+    Receives a voice answer from record.html, runs Whisper transcription,
+    and stores everything in the answers table.
+
+    FIX (Bug 3): question_text is now accepted and persisted so the evaluator
+    agent always has the original question to evaluate the transcript against.
+
+    FIX (Bug 4 / WARN): Whisper is called via run_in_executor so it does not
+    block the async event loop during the 10–60 s transcription window.
+    """
+    # ── Consent check ────────────────────────────────────────────────────────
     conn = get_db_connection()
 
     try:
@@ -379,39 +387,34 @@ async def upload_answer(
             FROM candidates c
             JOIN sessions s ON c.id = s.candidate_id
             WHERE s.id=?
-        """,
+            """,
             (session_id,),
         )
-
         consent_row = cursor.fetchone()
-
-        if not consent_row:
-            raise HTTPException(
-                status_code=404,
-                detail="Session not found.",
-            )
-
-        if consent_row["consent_accepted"] != 1:
-            raise HTTPException(
-                status_code=403,
-                detail="Consent required before recording.",
-            )
 
     finally:
         conn.close()
 
+    if not consent_row:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    if consent_row["consent_accepted"] != 1:
+        raise HTTPException(status_code=403, detail="Consent required before recording.")
+
+    # ── File validation & save ────────────────────────────────────────────────
     validate_file_size(audio, MAX_AUDIO_SIZE_MB)
-
-    suffix = validate_audio_extension(audio.filename or "audio.webm")
-
+    suffix    = validate_audio_extension(audio.filename or "audio.webm")
     answer_id = str(uuid.uuid4())
     audio_path = Path(settings.UPLOAD_DIR) / f"answer_{answer_id}{suffix}"
 
     with open(audio_path, "wb") as buffer:
         shutil.copyfileobj(audio.file, buffer)
 
-    transcript = transcribe_audio(str(audio_path))
+    # ── Whisper transcription (non-blocking) ──────────────────────────────────
+    loop       = asyncio.get_event_loop()
+    transcript = await loop.run_in_executor(None, _transcribe_sync, str(audio_path))
 
+    # ── Persist to DB ─────────────────────────────────────────────────────────
     conn = get_db_connection()
 
     try:
@@ -419,20 +422,16 @@ async def upload_answer(
 
         cursor.execute(
             """
-            INSERT INTO answers (
-                id,
-                session_id,
-                question_index,
-                audio_path,
-                transcript,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-        """,
+            INSERT INTO answers
+                (id, session_id, question_index, question_text,
+                 audio_path, transcript, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
             (
                 answer_id,
                 session_id,
                 question_index,
+                question_text,
                 str(audio_path),
                 transcript,
                 datetime.now(timezone.utc).isoformat(),
@@ -445,8 +444,8 @@ async def upload_answer(
         conn.close()
 
     return {
-        "message": "Answer uploaded successfully.",
-        "answer_id": answer_id,
+        "message":    "Answer uploaded successfully.",
+        "answer_id":  answer_id,
         "transcript": transcript,
     }
 
@@ -455,19 +454,13 @@ async def upload_answer(
 # GET REPORT
 # =============================================================================
 
-
 @app.get("/get_report")
 async def get_report(session_id: str):
     conn = get_db_connection()
 
     try:
         cursor = conn.cursor()
-
-        cursor.execute(
-            "SELECT * FROM reports WHERE session_id=?",
-            (session_id,),
-        )
-
+        cursor.execute("SELECT * FROM reports WHERE session_id=?", (session_id,))
         report = cursor.fetchone()
 
     finally:
@@ -483,12 +476,19 @@ async def get_report(session_id: str):
 
 
 # =============================================================================
-# HR DECISION
+# HR DECISION  (single audit log write — no duplicate with app.py)
 # =============================================================================
-
 
 @app.post("/hr_decision")
 async def hr_decision(request: HRDecisionRequest):
+    """
+    Records the HR decision in the database and writes ONE signed entry to the
+    append-only audit log.
+
+    This is the ONLY place the audit log is written.  app.py (Chainlit) updates
+    the database directly via process_decision() but does NOT call log_decision(),
+    avoiding the double-logging bug that existed before.
+    """
     allowed = {"approve", "reject", "hold"}
 
     if request.decision not in allowed:
@@ -497,22 +497,16 @@ async def hr_decision(request: HRDecisionRequest):
             detail=f"Decision must be one of: {allowed}",
         )
 
-    now = datetime.now(timezone.utc).isoformat()
-
+    now  = datetime.now(timezone.utc).isoformat()
     conn = get_db_connection()
 
     try:
         cursor = conn.cursor()
 
         cursor.execute(
-            """
-            SELECT ai_recommendation
-            FROM reports
-            WHERE session_id=?
-        """,
+            "SELECT ai_recommendation FROM reports WHERE session_id=?",
             (request.session_id,),
         )
-
         report_row = cursor.fetchone()
 
         if not report_row:
@@ -526,12 +520,9 @@ async def hr_decision(request: HRDecisionRequest):
         cursor.execute(
             """
             UPDATE reports
-            SET hr_decision=?,
-                hr_notes=?,
-                hr_user_id=?,
-                decided_at=?
+            SET hr_decision=?, hr_notes=?, hr_user_id=?, decided_at=?
             WHERE session_id=?
-        """,
+            """,
             (
                 request.decision,
                 request.hr_notes,
@@ -545,7 +536,6 @@ async def hr_decision(request: HRDecisionRequest):
             "SELECT candidate_id FROM sessions WHERE id=?",
             (request.session_id,),
         )
-
         session_row = cursor.fetchone()
 
         conn.commit()
@@ -553,36 +543,34 @@ async def hr_decision(request: HRDecisionRequest):
     finally:
         conn.close()
 
-    candidate_id = session_row["candidate_id"] if session_row else "unknown"
-
+    candidate_id  = session_row["candidate_id"] if session_row else "unknown"
     hr_notes_hash = hashlib.sha256(
-        request.hr_notes.encode("utf-8")
+        (request.hr_notes or "").encode("utf-8")
     ).hexdigest()
 
     audit_entry = {
-        "timestamp": now,
-        "candidate_id": candidate_id,
-        "session_id": request.session_id,
+        "timestamp":         now,
+        "candidate_id":      candidate_id,
+        "session_id":        request.session_id,
         "ai_recommendation": ai_recommendation,
-        "hr_decision": request.decision,
-        "hr_user_id": request.hr_user_id,
-        "hr_notes_hash": hr_notes_hash,
+        "hr_decision":       request.decision,
+        "hr_user_id":        request.hr_user_id,
+        "hr_notes_hash":     hr_notes_hash,
     }
 
     with open(settings.AUDIT_LOG_PATH, "a", encoding="utf-8") as f:
         f.write(json.dumps(audit_entry) + "\n")
 
     return {
-        "message": f"HR decision '{request.decision}' recorded.",
+        "message":    f"HR decision '{request.decision}' recorded.",
         "session_id": request.session_id,
-        "timestamp": now,
+        "timestamp":  now,
     }
 
 
 # =============================================================================
 # MAIN
 # =============================================================================
-
 
 if __name__ == "__main__":
     import uvicorn
