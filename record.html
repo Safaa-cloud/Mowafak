@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+    content="width=device-width, initial-scale=1.0">
+
+    <title>Mowafak AI Pre-Screen</title>
+
+    <link rel="stylesheet" href="styles.css">
+
+</head>
+
+<body>
+
+<div class="container">
+
+    <img
+    src="https://cdn-icons-png.flaticon.com/512/3135/3135715.png"
+    width="90"
+    style="display:block; margin:auto;">
+
+    <h1>Mowafak AI Hiring Assistant</h1>
+
+    <div class="card">
+
+        <h2>Consent Notice</h2>
+
+        <p>
+            This interview uses AI to analyze your
+            recorded answers. All hiring decisions
+            are reviewed by a human HR reviewer.
+            No automatic rejection is performed.
+        </p>
+
+        <button id="acceptBtn">
+            Accept & Continue
+        </button>
+
+    </div>
+
+    <div class="card">
+
+        <h2 id="questionTitle">
+            Question 1
+        </h2>
+
+        <p id="questionText">
+            Tell us about yourself.
+        </p>
+
+        <p id="progressText">
+            Question 1 of 5
+        </p>
+
+    </div>
+
+    <div class="card">
+
+        <button id="recordBtn">
+            Start Recording
+        </button>
+
+        <button id="stopBtn">
+            Stop Recording
+        </button>
+
+        <button id="uploadBtn">
+            Upload Answer
+        </button>
+
+        <button id="downloadBtn">
+            Download Recording
+        </button>
+
+        <p id="status">
+            🟢 Ready
+        </p>
+
+        <audio id="audioPlayer" controls></audio>
+
+    </div>
+
+</div>
+
+<script>
+
+const acceptBtn =
+document.getElementById("acceptBtn");
+
+const recordBtn =
+document.getElementById("recordBtn");
+
+const stopBtn =
+document.getElementById("stopBtn");
+
+const uploadBtn =
+document.getElementById("uploadBtn");
+
+const downloadBtn =
+document.getElementById("downloadBtn");
+
+const audioPlayer =
+document.getElementById("audioPlayer");
+
+const statusText =
+document.getElementById("status");
+
+const questionTitle =
+document.getElementById("questionTitle");
+
+const questionText =
+document.getElementById("questionText");
+
+const progressText =
+document.getElementById("progressText");
+
+recordBtn.disabled = true;
+
+stopBtn.disabled = true;
+
+uploadBtn.disabled = true;
+
+downloadBtn.disabled = true;
+
+let mediaRecorder;
+
+let audioChunks = [];
+
+let audioBlob;
+
+const questions = [
+
+    "Tell us about yourself.",
+
+    "Describe a project you worked on.",
+
+    "What technologies have you used before?",
+
+    "How do you solve programming bugs?",
+
+    "Why do you want this role?"
+
+];
+
+let currentQuestion = 0;
+
+function loadQuestion() {
+
+    questionTitle.innerText =
+        `Question ${currentQuestion + 1}`;
+
+    questionText.innerText =
+        questions[currentQuestion];
+
+    progressText.innerText =
+        `Question ${currentQuestion + 1} of ${questions.length}`;
+
+}
+
+loadQuestion();
+
+acceptBtn.onclick = () => {
+
+    recordBtn.disabled = false;
+
+    alert("Consent Accepted");
+
+};
+
+recordBtn.onclick = async () => {
+
+    try {
+
+        const stream =
+        await navigator.mediaDevices.getUserMedia({
+            audio: true
+        });
+
+        mediaRecorder =
+        new MediaRecorder(stream);
+
+        audioChunks = [];
+
+        mediaRecorder.start();
+
+        statusText.innerText =
+            "🔴 Recording...";
+
+        stopBtn.disabled = false;
+
+        recordBtn.disabled = true;
+
+        mediaRecorder.ondataavailable =
+        (event) => {
+
+            audioChunks.push(event.data);
+
+        };
+
+        mediaRecorder.onstop = () => {
+
+            audioBlob =
+            new Blob(audioChunks, {
+                type: 'audio/wav'
+            });
+
+            const audioURL =
+            URL.createObjectURL(audioBlob);
+
+            audioPlayer.src = audioURL;
+
+            statusText.innerText =
+                "Recording Finished";
+
+            uploadBtn.disabled = false;
+
+            downloadBtn.disabled = false;
+
+            recordBtn.disabled = false;
+
+            stopBtn.disabled = true;
+
+            downloadBtn.onclick = () => {
+
+                const a =
+                document.createElement("a");
+
+                a.href = audioURL;
+
+                a.download =
+                "candidate_answer.wav";
+
+                a.click();
+
+            };
+
+        };
+
+    } catch (error) {
+
+        alert("Microphone access denied");
+
+        console.log(error);
+
+    }
+
+};
+
+stopBtn.onclick = () => {
+
+    if (mediaRecorder) {
+
+        mediaRecorder.stop();
+
+    }
+
+};
+
+uploadBtn.onclick = () => {
+
+    statusText.innerText =
+        "Uploading...";
+
+    setTimeout(() => {
+
+        statusText.innerText =
+            "Uploaded Successfully";
+
+        currentQuestion++;
+
+        if (currentQuestion < questions.length) {
+
+            loadQuestion();
+
+            uploadBtn.disabled = true;
+
+        } else {
+
+            questionTitle.innerText =
+                "Interview Completed";
+
+            questionText.innerText =
+                "Thank you for your time.";
+
+            progressText.innerText =
+                "Done";
+
+            recordBtn.disabled = true;
+
+            stopBtn.disabled = true;
+
+            uploadBtn.disabled = true;
+
+        }
+
+    }, 2000);
+
+};
+
+</script>
+
+</body>
+
+</html>
