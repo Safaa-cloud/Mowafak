@@ -1,0 +1,4 @@
+timestamp,candidate_id,hr_notes,hr_decision,hr_user_id,verified_by,ai_recommendation
+2026-05-10T23:34:45.347837,CAND-001,,Approved,,HR_Manager_Mariam,strong
+2026-05-14T00:51:22.293185,TEST-123,"Perfect candidate, testing the system.",Approved,HR_Manager_Mariam,,strong
+2026-05-14T00:53:52.320262,TEST-123,"Perfect candidate, testing the system.",Approved,HR_Manager_Mariam,,strong

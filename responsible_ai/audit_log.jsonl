@@ -1,1 +1,3 @@
-{"timestamp": "2026-05-10T23:34:45.347837", "candidate_id": "CAND-001", "ai_recommendation": "strong_yes", "hr_decision": "Approved", "verified_by": "HR_Manager_Mariam"}
+{"timestamp": "2026-05-10T23:34:45.347837", "candidate_id": "CAND-001", "ai_recommendation": "strong", "hr_decision": "Approved", "verified_by": "HR_Manager_Mariam"}
+{"timestamp": "2026-05-14T00:51:22.293185", "candidate_id": "TEST-123", "ai_recommendation": "strong", "hr_decision": "Approved", "hr_notes": "Perfect candidate, testing the system.", "hr_user_id": "HR_Manager_Mariam"}
+{"timestamp": "2026-05-14T00:53:52.320262", "candidate_id": "TEST-123", "ai_recommendation": "strong", "hr_decision": "Approved", "hr_notes": "Perfect candidate, testing the system.", "hr_user_id": "HR_Manager_Mariam"}

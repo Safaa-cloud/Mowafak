@@ -34,8 +34,7 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 def parse_cv(text):
     #4. define prompt to instruct the model to extract the required information from the CV text 
     # then return it in a JSON format that matches the CVData structure
-    prompt = CV_PARSER_PROMPT
-
+    prompt = CV_PARSER_PROMPT.format(text=text)
     # 5. send the prompt to the Gemini API and get the response
     response = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
 

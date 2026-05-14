@@ -38,13 +38,11 @@ async def process_decision(cand_id: str, decision: str, hr_notes: str = "None"):
 def format_ai_badge(ai_rec: str) -> str:
     """Helper to make the UI look professional."""
     badges = {
-        "strong_yes": "🟢 Strong Yes",
-        "yes": "🟡 Yes",
-        "no": "🟠 No",
-        "strong_no": "🔴 Strong No",
+        "strong": "🟢 Strong",
+        "average": "🟡 Average",
+        "weak": "🔴 Weak",
     }
-    return badges.get(ai_rec, f"🤖 {ai_rec.replace('_', ' ').title()}")
-
+    return badges.get(ai_rec.lower(), f"🤖 {ai_rec.title()}")
 # ==========================================
 # 2. UI Initialization & Dashboard
 # ==========================================
