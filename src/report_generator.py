@@ -1,10 +1,16 @@
 import json
-from settings import GEMINI_API_KEY, GEMINI_MODEL
-from agents.response_evaluator import evaluate_response, ResponseAssesment
-from google import genai
-from agents.question_generator import SkillsMatrix
+import logging
 from pydantic import BaseModel, Field, ValidationError
-from prompts import REPORT_GENERATOR_PROMPT
+from google import genai
+from google.genai import types
+
+from src.settings import GEMINI_API_KEY, GEMINI_MODEL
+from src.prompts import REPORT_GENERATOR_PROMPT
+from src.agents.response_evaluator import ResponseAssesment
+from src.agents.question_generator import SkillsMatrix
+
+# Configure secure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - REPORT_GEN - %(message)s')
 
 # Define the structure of the final report using a pydantic model
 class Report(BaseModel):
@@ -13,32 +19,44 @@ class Report(BaseModel):
     recommendation: str = Field(description="Final recommendation for the candidate (strong / average / weak)")
     summary: str = Field(description="Written summary of the candidate's performance in the interview")
 
-# define the client to interact with Gemini API
+# Define the client to interact with Gemini API
 client = genai.Client(api_key=GEMINI_API_KEY)
 
+def generate_report(assessments: list[ResponseAssesment], skills_matrix: SkillsMatrix) -> Report | None:
+    """Generates the final candidate report using Native Structured Outputs."""
+    
+    if not assessments or not skills_matrix:
+        logging.error("Missing assessments or skills matrix. Cannot generate report.")
+        return None
 
-# function to generate the final report based on the assessments of the candidate's responses and the skills matrix for the position
-def generate_report(assessments: list[ResponseAssesment], skills_matrix: SkillsMatrix) -> Report:
     prompt = REPORT_GENERATOR_PROMPT.format(
         assessments=assessments, 
         skills_matrix=skills_matrix
     )
     
-    response = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
-
-    response_text = response.text.strip()  # remove leading/trailing whitespace
-    # remove markdown backticks if present
-    if response_text.startswith("```"):
-        response_text = response_text.split("```")[1]
-    if response_text.startswith("json"):
-        response_text = response_text[4:]   
     try:
-        data = json.loads(response_text)
-        report = Report(**data)
-        print("Report Generated!")
-        return report
-    except json.JSONDecodeError as e:
-        print("Failed to parse JSON:", e)
-    except ValidationError as ve:
-        print("Validation error while creating Report object:", ve)
+        # Force Gemini to output the exact Report schema using GenerateContentConfig
+        response = client.models.generate_content(
+            model=GEMINI_MODEL, 
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=Report,
+                temperature=0.2, # Low temperature for objective summarization
+            )
+        )
 
+        data = json.loads(response.text)
+        report = Report(**data)
+        logging.info(f"Final HR Report generated successfully with recommendation: {report.recommendation}")
+        return report
+
+    except json.JSONDecodeError:
+        logging.error("Gemini output could not be decoded into JSON.")
+        return None
+    except ValidationError as ve:
+        logging.error(f"Validation error while creating Report object: {ve}")
+        return None
+    except Exception as e:
+        logging.error("An unexpected error occurred during report generation.")
+        return None

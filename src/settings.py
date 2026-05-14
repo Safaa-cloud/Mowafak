@@ -27,3 +27,6 @@ class Settings(BaseSettings):
 settings = Settings()
 
 Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+
+GEMINI_API_KEY = settings.GEMINI_API_KEY
+GEMINI_MODEL = settings.GEMINI_MODEL

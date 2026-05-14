@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+    content="width=device-width, initial-scale=1.0">
+
+    <title>HR Review Dashboard</title>
+
+    <link rel="stylesheet" href="styles.css">
+
+</head>
+
+<body>
+
+<div class="container">
+
+    <img
+    src="https://cdn-icons-png.flaticon.com/512/3135/3135715.png"
+    width="90"
+    style="display:block; margin:auto;">
+
+    <h1>HR Candidate Review</h1>
+
+    <div class="card">
+
+        <h2>Candidate Information</h2>
+
+        <p>
+            <strong>Candidate ID:</strong>
+            cand_001
+        </p>
+
+        <p>
+            <strong>Role:</strong>
+            Junior Developer
+        </p>
+
+        <p>
+            <strong>AI Recommendation:</strong>
+            weak_yes
+        </p>
+
+    </div>
+
+    <div class="card">
+
+        <h2>Transcript</h2>
+
+        <p>
+            I built a Flutter application
+            using Firebase Authentication
+            and REST APIs for secure user login
+            and cloud database storage.
+        </p>
+
+    </div>
+
+    <div class="card">
+
+        <h2>Assessment Scores</h2>
+
+        <div class="scoreBox">
+
+            <div class="scoreItem">
+
+                <h3>Relevance</h3>
+
+                <p>4/5</p>
+
+            </div>
+
+            <div class="scoreItem">
+
+                <h3>Clarity</h3>
+
+                <p>5/5</p>
+
+            </div>
+
+            <div class="scoreItem">
+
+                <h3>Technical Depth</h3>
+
+                <p>3/5</p>
+
+            </div>
+
+        </div>
+
+    </div>
+
+    <div class="card">
+
+        <h2>Evidence Quote</h2>
+
+        <p>
+            "I used Firebase Authentication
+            to manage users securely."
+        </p>
+
+    </div>
+
+    <div class="card">
+
+        <h2>Concerns</h2>
+
+        <ul>
+
+            <li>
+                Limited testing explanation
+            </li>
+
+            <li>
+                Did not discuss scalability
+            </li>
+
+        </ul>
+
+    </div>
+
+    <div class="card">
+
+        <h2>HR Decision</h2>
+
+        <button id="approveBtn">
+            Approve to next round
+        </button>
+
+        <button id="rejectBtn">
+            Reject with feedback
+        </button>
+
+        <button id="holdBtn">
+            Hold for review
+        </button>
+
+        <br><br>
+
+        <textarea
+        placeholder="Write HR feedback here..."
+        rows="4">
+        </textarea>
+
+        <p id="decisionStatus"></p>
+
+    </div>
+
+</div>
+
+<script>
+
+const approveBtn =
+document.getElementById("approveBtn");
+
+const rejectBtn =
+document.getElementById("rejectBtn");
+
+const holdBtn =
+document.getElementById("holdBtn");
+
+const decisionStatus =
+document.getElementById("decisionStatus");
+
+approveBtn.onclick = () => {
+
+    decisionStatus.innerText =
+        "Candidate approved for next round";
+
+};
+
+rejectBtn.onclick = () => {
+
+    decisionStatus.innerText =
+        "Candidate rejected with HR feedback";
+
+};
+
+holdBtn.onclick = () => {
+
+    decisionStatus.innerText =
+        "⏳ Candidate placed on hold";
+
+};
+
+</script>
+
+</body>
+
+</html>

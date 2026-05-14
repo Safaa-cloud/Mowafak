@@ -21,16 +21,24 @@ def verify_hil_clearance(candidate_id: str) -> bool:
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT hr_decision FROM interviews WHERE candidate_id = ?', (candidate_id,))
+        
+        # FIXED: Joined 'reports' and 'sessions' to find the HR decision by candidate_id
+        cursor.execute('''
+            SELECT r.hr_decision 
+            FROM reports r
+            JOIN sessions s ON r.session_id = s.id
+            WHERE s.candidate_id = ?
+        ''', (candidate_id,))
+        
         row = cursor.fetchone()
         conn.close()
 
         if not row:
-            logging.error(f"Blocked: No interview records found for candidate '{candidate_id}'.")
+            logging.error(f"Blocked: No report records found for candidate '{candidate_id}'.")
             return False
         
         decision = row[0]
-        if decision in ["Approved", "Rejected"]:
+        if decision in ["approve", "reject", "Approved", "Rejected"]: # Adjusted to match both backend/UI formats
             logging.info(f"Cleared: Candidate '{candidate_id}' has an explicit HR decision: {decision}.")
             return True
         else:
@@ -54,7 +62,15 @@ def get_final_feedback(candidate_id: str) -> dict:
     
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT hr_decision, hr_notes FROM interviews WHERE candidate_id = ?', (candidate_id,))
+    
+    # FIXED: Querying the reports table via the session link
+    cursor.execute('''
+        SELECT r.hr_decision, r.hr_notes 
+        FROM reports r
+        JOIN sessions s ON r.session_id = s.id
+        WHERE s.candidate_id = ?
+    ''', (candidate_id,))
+    
     row = cursor.fetchone()
     conn.close()
 

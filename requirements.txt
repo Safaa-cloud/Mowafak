@@ -1,6 +1,7 @@
 langgraph
 langchain
 langchain-google-genai
+google-generativeai
 openai-whisper
 chainlit
 fastapi
@@ -11,3 +12,4 @@ python-multipart
 deepeval
 structlog
 python-dotenv
+pytest

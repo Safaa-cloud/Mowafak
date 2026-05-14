@@ -1,6 +1,7 @@
 import chainlit as cl
 import sqlite3
 import os
+import json
 from src.audit_log import log_decision, export_log_to_csv
 
 # ==========================================
@@ -21,11 +22,20 @@ async def process_decision(cand_id: str, decision: str, hr_notes: str = "None"):
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # 1. Update Database (Clearing the HiL Gate)
-    cursor.execute('UPDATE interviews SET hr_decision = ?, hr_notes = ? WHERE candidate_id = ?', (decision, hr_notes, cand_id))
+    # 1. Update Database (Clearing the HiL Gate using the correct reports/sessions schema)
+    cursor.execute('''
+        UPDATE reports 
+        SET hr_decision = ?, hr_notes = ? 
+        WHERE session_id = (SELECT id FROM sessions WHERE candidate_id = ?)
+    ''', (decision, hr_notes, cand_id))
     
     # 2. Fetch AI Recommendation to complete the Audit Log
-    cursor.execute('SELECT ai_recommendation FROM interviews WHERE candidate_id = ?', (cand_id,))
+    cursor.execute('''
+        SELECT ai_recommendation 
+        FROM reports 
+        WHERE session_id = (SELECT id FROM sessions WHERE candidate_id = ?)
+    ''', (cand_id,))
+    
     ai_rec_row = cursor.fetchone()
     ai_rec = ai_rec_row[0] if ai_rec_row else "N/A"
 
@@ -43,6 +53,7 @@ def format_ai_badge(ai_rec: str) -> str:
         "weak": "🔴 Weak",
     }
     return badges.get(ai_rec.lower(), f"🤖 {ai_rec.title()}")
+
 # ==========================================
 # 2. UI Initialization & Dashboard
 # ==========================================
@@ -54,15 +65,17 @@ async def start():
 
     try:
         conn = get_db_connection()
+        conn.row_factory = sqlite3.Row # Allows us to access columns by name
         cursor = conn.cursor()
         
-        # Fetch ONE pending candidate to review
+        # Fetch ONE pending candidate to review using the correct schema
         cursor.execute('''
-            SELECT c.id, c.name, i.ai_recommendation, q.evaluation_score, q.question_text, q.transcript, q.evaluation_evidence
+            SELECT c.id as cand_id, c.name, r.ai_recommendation, r.report_json, a.transcript
             FROM candidates c
-            JOIN interviews i ON c.id = i.candidate_id
-            LEFT JOIN interview_questions q ON i.id = q.interview_id
-            WHERE i.hr_decision = 'Pending' OR i.hr_decision IS NULL
+            JOIN sessions s ON c.id = s.candidate_id
+            JOIN reports r ON s.id = r.session_id
+            LEFT JOIN answers a ON s.id = a.session_id
+            WHERE r.hr_decision = 'pending' OR r.hr_decision IS NULL
             LIMIT 1
         ''')
         row = cursor.fetchone()
@@ -72,22 +85,30 @@ async def start():
             await cl.Message(content="📭 **No candidates pending review.** All applications have been processed.").send()
             return
 
-        cand_id, name, ai_rec, score, question, transcript, evidence = row
+        cand_id = row['cand_id']
+        name = row['name']
+        ai_rec = row['ai_recommendation']
+        transcript = row['transcript']
+        
+        # Safely parse the report JSON to get the score
+        score = "N/A"
+        try:
+            if row['report_json']:
+                report_data = json.loads(row['report_json'])
+                score = report_data.get("overall_score", "N/A")
+        except:
+            pass
 
         # Build the Markdown Report for the UI
         report_content = f"""## 📊 Candidate Assessment Panel
             
 | 👤 Profile Details | 📈 Assessment Results |
 | :--- | :--- |
-| **Name:** {name} <br> **ID:** `{cand_id}` | **Score:** ⭐ {score if score else 'N/A'}/5 <br> **AI Rec:** {format_ai_badge(ai_rec if ai_rec else 'pending')} |
+| **Name:** {name} <br> **ID:** `{cand_id}` | **Overall Score:** ⭐ {score}/5 <br> **AI Rec:** {format_ai_badge(ai_rec if ai_rec else 'pending')} |
 
 ---
-### 🎙️ Interview Transcript & Evidence
-**Question:** *"{question if question else 'No question recorded.'}"*
-
+### 🎙️ Latest Interview Transcript
 **Candidate Response:** > "{transcript if transcript else 'No audio transcript found.'}"
-
-**AI Evidence for Score:** > "*{evidence if evidence else 'No specific evidence quoted by AI.'}*"
 
 ---
 > 🛡️ **Final HR Approval (HiL Gate):** *The AI screening is complete. Awaiting final human confirmation to finalize the status. No candidate is rejected automatically.*
@@ -107,7 +128,7 @@ async def start():
         cl.user_session.set("report_msg", msg)
 
     except Exception as e:
-        await cl.Message(content=f"⚠️ Database Error: Please ensure `orchestrator.py` has run at least once to create the tables. ({e})").send()
+        await cl.Message(content=f"⚠️ Database Error: Please ensure the orchestrator has populated the `reports` table. ({e})").send()
 
 # ==========================================
 # 3. Action Handlers (Button Clicks)
