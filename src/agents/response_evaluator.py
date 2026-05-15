@@ -1,44 +1,63 @@
 import json
+import logging
 from pydantic import BaseModel, Field, ValidationError
-from cv_parser import CVData
-from question_generator import InterviewQuestions, SkillsMatrix
 from google import genai
-from settings import GEMINI_API_KEY, GEMINI_MODEL
-from prompts import RESPONSE_EVALUATOR_PROMPT
+from google.genai import types
 
-# pydantic model to structure the evaluation of the candidate's response
-class ResponseAssesment(BaseModel):
-    relevance_score : int = Field(description="Relevance of the candidate's answer to the question on a scale of 1-5")
-    clarity_score : int = Field(description="Clarity of the candidate's answer on a scale of 1-5")
-    technical_depth_score : int = Field(description="Technical depth of the candidate's answer on a scale of 1-5")
-    evidence_from_transcript : str = Field(description="Specific evidence from the candidate's answer transcript that supports the assigned scores")
+from src.settings import GEMINI_API_KEY, GEMINI_MODEL
+from src.cv_parser import CVData
+from src.agents.question_generator import InterviewQuestions, SkillsMatrix
+from src.prompts import RESPONSE_EVALUATOR_PROMPT
+
+# Configure secure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - EVALUATOR - %(message)s')
+
+# FIXED TYPO: ResponseAssesment -> ResponseAssessment
+class ResponseAssessment(BaseModel):
+    relevance_score: int = Field(description="Relevance of the candidate's answer to the question on a scale of 1-5")
+    clarity_score: int = Field(description="Clarity of the candidate's answer on a scale of 1-5")
+    technical_depth_score: int = Field(description="Technical depth of the candidate's answer on a scale of 1-5")
+    evidence_from_transcript: str = Field(description="Specific evidence from the candidate's answer transcript that supports the assigned scores")
     concerns: list[str] = Field(description="List of any concerns or red flags raised by the candidate's answer")
 
-# define the client to interact with Gemini API
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# function to evaluate the candidate's response to an interview question based on the transcript of their answer, the skills matrix for the position, and the original question asked
-def evaluate_response(transcript: str, skill_matrix: SkillsMatrix, original_question: str ) -> ResponseAssesment:
-    prompt = RESPONSE_EVALUATOR_PROMPT
+def evaluate_response(transcript: str, skill_matrix: SkillsMatrix, original_question: str) -> ResponseAssessment | None:
+    """Evaluates a single candidate answer using Native Structured Outputs."""
     
-    response = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
-    
-    response_text = response.text.strip()  # remove leading/trailing whitespace
-    # remove markdown backticks if present
-    if response_text.startswith("```"):
-        response_text = response_text.split("```")[1]
-    if response_text.startswith("json"):
-        response_text = response_text[4:]
-
-    try:
-        data = json.loads(response_text)
-        assessment = ResponseAssesment(**data)
-        print("Response Assessment Generated!")
-        return assessment
-    except json.JSONDecodeError as e:
-        print("Failed to parse JSON:", e)
-        return None 
-    except ValidationError as e:
-        print("Pydantic validation error:", e)
+    if not transcript or not original_question:
+        logging.warning("Missing transcript or original question. Skipping evaluation.")
         return None
-        
+
+    prompt = RESPONSE_EVALUATOR_PROMPT.format(
+        transcript=transcript, 
+        skill_matrix=skill_matrix, 
+        original_question=original_question
+    )
+    
+    try:
+        # Force Gemini to output the exact ResponseAssessment schema
+        response = client.models.generate_content(
+            model=GEMINI_MODEL, 
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=ResponseAssessment,
+                temperature=0.1, # Low temperature for strict, objective grading
+            )
+        )
+
+        data = json.loads(response.text)
+        assessment = ResponseAssessment(**data)
+        logging.info(f"Successfully evaluated response. Relevance Score: {assessment.relevance_score}/5")
+        return assessment
+
+    except json.JSONDecodeError:
+        logging.error("Gemini output could not be decoded into JSON.")
+        return None
+    except ValidationError as ve:
+        logging.error(f"Validation error while creating ResponseAssessment object: {ve}")
+        return None
+    except Exception as e:
+        logging.error("An unexpected error occurred during response evaluation.")
+        return None

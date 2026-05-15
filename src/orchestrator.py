@@ -1,22 +1,14 @@
 import os
-import sys
 import sqlite3
 import logging
 from typing import TypedDict, List
 from langgraph.graph import StateGraph, END
-import json
-
-# Add the parent directory to the path so 'src' module can be found
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
 
 # Synchronized imports from your agents
-from src.cv_parser import parse_cv, extract_text_from_pdf, CVData
+from src.agents.cv_parser import parse_cv, extract_text_from_pdf, CVData
 from src.agents.question_generator import generate_questions, SkillsMatrix
 from src.agents.response_evaluator import evaluate_response
-from src.report_generator import generate_report
+from src.agents.report_generator import generate_report
 
 logger = logging.getLogger(__name__)
 
@@ -49,25 +41,13 @@ def parsing_node(state: InterviewState):
     return {"cv_data": cv_results.model_dump() if cv_results else {}}
 
 def question_generation_node(state: InterviewState):
+    """Step 2: Generate tailored questions based on the parsed CV."""
     print("--- STEP 2: GENERATING QUESTIONS ---")
     matrix = SkillsMatrix(**state['skills_matrix'])
+    # Reconstruct CVData for the agent
     cv_data_obj = CVData(**state['cv_data'])
     questions_obj = generate_questions(cv_data_obj, matrix)
-    questions = questions_obj.questions if questions_obj else []
-    
-    # Save questions to DB for the candidate page
-    if questions and state['session_id']:
-        db_path = os.path.join(os.getcwd(), 'data', 'mowafak.db')
-        conn = sqlite3.connect(db_path)
-        conn.execute(
-            "UPDATE sessions SET questions_json=? WHERE id=?",
-            (json.dumps(questions), state['session_id'])
-        )
-        conn.commit()
-        conn.close()
-        print(f"Questions saved to DB for session {state['session_id']}")
-    
-    return {"questions": questions}
+    return {"questions": questions_obj.questions if questions_obj else []}
 
 def evaluation_node(state: InterviewState):
     """Step 3: Evaluate each answer transcript against its question."""
@@ -138,5 +118,3 @@ workflow.add_edge("reporter", END)
 
 # Compile the final application
 app = workflow.compile()
-
-

@@ -276,28 +276,6 @@ async def upload_cv(
     finally:
         conn.close()
 
-    # Trigger orchestrator automatically in background
-    async def run_orchestrator_bg():
-        from src.orchestrator import app as orchestrator_app
-        initial_state = {
-            "candidate_id": candidate_id,
-            "session_id": session_id,
-            "cv_path": str(upload_path),
-            "skills_matrix": {
-                "required_skills": ["Python", "Machine Learning", "SQL"],
-                "nice_to_have_skills": ["TensorFlow", "Docker"]
-            },
-            "cv_data": {},
-            "questions": [],
-            "transcripts": [],
-            "assessments": [],
-            "final_report": {},
-            "status": ""
-        }
-        orchestrator_app.invoke(initial_state)
-
-    asyncio.create_task(run_orchestrator_bg())
-
     return {
         "message":      "CV uploaded successfully.",
         "candidate_id": candidate_id,
