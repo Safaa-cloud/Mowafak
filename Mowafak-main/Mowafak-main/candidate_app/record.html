@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mowafak — Async AI Interview</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Design tokens ─────────────────────────────────── */
+    :root {
+      --navy:   #0a0f2c;
+      --blue:   #0047ff;
+      --ice:    #dce9ff;
+      --mid:    #6b7db3;
+      --white:  #ffffff;
+      --danger: #e03131;
+      --green:  #2f9e44;
+      --amber:  #e67700;
+      --card-bg: rgba(255,255,255,0.06);
+      --border:  rgba(255,255,255,0.12);
+      --radius: 16px;
+      --radius-sm: 10px;
+    }
+
+    /* ── Reset & base ─────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--navy);
+      color: var(--white);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Animated starfield background ───────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 20% 10%, rgba(0,71,255,0.18) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 50% at 80% 80%, rgba(0,71,255,0.10) 0%, transparent 55%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Layout ───────────────────────────────────────── */
+    .shell {
+      position: relative;
+      z-index: 1;
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 40px 20px 80px;
+    }
+
+    /* ── Logo / wordmark ──────────────────────────────── */
+    .wordmark {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 48px;
+    }
+    .wordmark-icon {
+      width: 40px; height: 40px;
+      background: var(--blue);
+      border-radius: 10px;
+      display: grid; place-items: center;
+      font-size: 20px;
+    }
+    .wordmark-text {
+      font-family: 'DM Serif Display', serif;
+      font-size: 1.5rem;
+      color: var(--white);
+      letter-spacing: -0.5px;
+    }
+    .wordmark-sub {
+      font-size: .7rem;
+      font-weight: 500;
+      color: var(--mid);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-top: 1px;
+    }
+
+    /* ── Cards ────────────────────────────────────────── */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 32px;
+      margin-bottom: 20px;
+      backdrop-filter: blur(12px);
+      transition: border-color .25s;
+    }
+    .card.active-card { border-color: rgba(0,71,255,0.5); }
+    .card-label {
+      font-size: .7rem;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--mid);
+      margin-bottom: 10px;
+    }
+    .card h2 {
+      font-family: 'DM Serif Display', serif;
+      font-size: 1.35rem;
+      font-weight: 400;
+      color: var(--white);
+      margin-bottom: 6px;
+    }
+
+    /* ── Screens ──────────────────────────────────────── */
+    #screen-consent { display: block; }
+    #screen-interview { display: none; }
+    #screen-done { display: none; }
+
+    .consent-notice {
+      background: rgba(0,71,255,0.12);
+      border: 1px solid rgba(0,71,255,0.35);
+      border-radius: var(--radius-sm);
+      padding: 18px 20px;
+      margin: 18px 0 22px;
+      line-height: 1.65;
+      font-size: .95rem;
+      color: var(--ice);
+    }
+    .consent-notice strong { color: var(--white); }
+
+    .consent-items {
+      list-style: none;
+      margin: 14px 0;
+    }
+    .consent-items li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: .9rem;
+      color: var(--ice);
+      margin-bottom: 10px;
+      line-height: 1.5;
+    }
+    .consent-items li span.icon {
+      color: var(--blue);
+      font-size: 1rem;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .consent-checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 22px 0 0;
+      cursor: pointer;
+    }
+    .consent-checkbox-row input[type="checkbox"] {
+      width: 20px; height: 20px;
+      accent-color: var(--blue);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .consent-checkbox-row label {
+      font-size: .9rem;
+      color: var(--ice);
+      cursor: pointer;
+      line-height: 1.45;
+    }
+
+    /* ── Buttons ──────────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 13px 24px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: .95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity .2s, transform .15s, box-shadow .2s;
+    }
+    .btn:hover:not(:disabled) { transform: translateY(-1px); }
+    .btn:active:not(:disabled) { transform: translateY(0); }
+    .btn:disabled { opacity: .38; cursor: not-allowed; transform: none !important; }
+
+    .btn-primary { background: var(--blue); color: var(--white); box-shadow: 0 4px 20px rgba(0,71,255,0.4); }
+    .btn-primary:hover:not(:disabled) { box-shadow: 0 6px 28px rgba(0,71,255,0.55); }
+    .btn-danger  { background: var(--danger); color: var(--white); }
+    .btn-dark    { background: rgba(255,255,255,0.08); color: var(--white); border: 1px solid var(--border); }
+    .btn-green   { background: var(--green); color: var(--white); }
+    .btn-amber   { background: var(--amber); color: var(--white); }
+
+    .btn-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+
+    /* ── Progress bar ─────────────────────────────────── */
+    .progress-track {
+      height: 4px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 32px;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--blue);
+      border-radius: 4px;
+      transition: width .5s cubic-bezier(.4,0,.2,1);
+    }
+    .progress-label {
+      font-size: .78rem;
+      color: var(--mid);
+      font-weight: 500;
+      margin-bottom: 8px;
+      letter-spacing: .5px;
+    }
+
+    /* ── Question card ────────────────────────────────── */
+    .q-number {
+      font-size: .72rem;
+      font-weight: 600;
+      letter-spacing: 2px;
+      color: var(--blue);
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+    .q-text {
+      font-family: 'DM Serif Display', serif;
+      font-size: 1.4rem;
+      font-weight: 400;
+      line-height: 1.45;
+      color: var(--white);
+    }
+
+    .tts-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .tts-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: .82rem;
+      color: var(--mid);
+    }
+    .tts-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--mid);
+    }
+    .tts-dot.speaking {
+      background: var(--blue);
+      animation: pulse 0.8s infinite alternate;
+    }
+    @keyframes pulse { to { transform: scale(1.6); opacity: .5; } }
+
+    /* ── Audio visualiser ─────────────────────────────── */
+    .viz-wrap {
+      margin: 20px 0;
+      height: 56px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      gap: 3px;
+    }
+    .viz-bar {
+      width: 4px;
+      background: var(--blue);
+      border-radius: 2px 2px 0 0;
+      height: 6px;
+      transition: height .1s ease;
+      opacity: .75;
+    }
+
+    /* ── Status badge ─────────────────────────────────── */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: .85rem;
+      font-weight: 500;
+      padding: 6px 14px;
+      border-radius: 100px;
+      margin-top: 14px;
+    }
+    .status-idle    { background: rgba(255,255,255,0.07); color: var(--mid); }
+    .status-rec     { background: rgba(224,49,49,0.15); color: #ff8080; }
+    .status-done    { background: rgba(47,158,68,0.15); color: #69db7c; }
+    .status-upload  { background: rgba(0,71,255,0.15); color: #74c0fc; }
+    .status-error   { background: rgba(224,49,49,0.15); color: #ff8080; }
+
+    /* ── Audio player ─────────────────────────────────── */
+    audio {
+      width: 100%;
+      margin-top: 14px;
+      border-radius: 8px;
+      outline: none;
+    }
+    audio::-webkit-media-controls-panel { background: rgba(0,71,255,0.15); }
+
+    /* ── Done screen ──────────────────────────────────── */
+    .done-hero {
+      text-align: center;
+      padding: 20px 0 10px;
+    }
+    .done-hero .check {
+      font-size: 3.5rem;
+      margin-bottom: 16px;
+    }
+    .done-hero h2 {
+      font-family: 'DM Serif Display', serif;
+      font-size: 2rem;
+      font-weight: 400;
+      margin-bottom: 10px;
+    }
+    .done-hero p {
+      font-size: .95rem;
+      color: var(--mid);
+      max-width: 400px;
+      margin: 0 auto;
+      line-height: 1.6;
+    }
+
+    /* ── Fade-in animation ────────────────────────────── */
+    .fade-in {
+      animation: fadeIn .45s ease forwards;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Responsive ───────────────────────────────────── */
+    @media (max-width: 520px) {
+      .shell { padding: 24px 14px 60px; }
+      .card  { padding: 22px 20px; }
+      .q-text { font-size: 1.2rem; }
+    }
+  </style>
+</head>
+<body>
+<div class="shell">
+
+  <div class="wordmark">
+    <div class="wordmark-icon">🤝</div>
+    <div>
+      <div class="wordmark-text">Mowafak</div>
+      <div class="wordmark-sub">Async AI Interview</div>
+    </div>
+  </div>
+
+  <div id="screen-consent">
+    <div class="card fade-in">
+      <div class="card-label">Before You Begin</div>
+      <h2>Your Privacy &amp; Rights</h2>
+      <div class="consent-notice">
+        <strong>Important notice:</strong> Your voice answer will be transcribed and assessed by AI.
+        A human HR reviewer will make the final hiring decision.
+      </div>
+      <ul class="consent-items">
+        <li><span class="icon">🎙️</span><span>Your voice will be recorded and sent over an encrypted connection.</span></li>
+        <li><span class="icon">🤖</span><span>An AI system will transcribe and score your answers.</span></li>
+        <li><span class="icon">👤</span><span>Every assessment is reviewed by HR (Mariam's team).</span></li>
+      </ul>
+      <div class="consent-checkbox-row">
+        <input type="checkbox" id="consentCheck" />
+        <label for="consentCheck">I consent to my voice being recorded and assessed by AI.</label>
+      </div>
+      <div class="btn-row">
+        <button id="acceptBtn" class="btn btn-primary" disabled>✓ &nbsp;Accept &amp; Begin</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="screen-interview">
+    <div class="progress-label" id="progressLabel">Question 1 of 5</div>
+    <div class="progress-track"><div class="progress-fill" id="progressFill" style="width:20%"></div></div>
+
+    <div class="card active-card fade-in" id="questionCard">
+      <div class="q-number" id="qNumber">Question 1</div>
+      <div class="q-text" id="qText">Loading…</div>
+      <div class="tts-row">
+        <button class="btn btn-dark" id="speakBtn" style="padding:8px 14px; font-size:.82rem;">🔊 &nbsp;Read aloud</button>
+        <div class="tts-indicator"><div class="tts-dot" id="ttsDot"></div><span id="ttsStatus">Click to hear</span></div>
+      </div>
+    </div>
+
+    <div class="card fade-in" id="recordCard">
+      <div class="card-label">Your Answer</div>
+      <div class="viz-wrap" id="vizWrap">
+        <div class="viz-bar" id="vb0"></div><div class="viz-bar" id="vb1"></div><div class="viz-bar" id="vb2"></div>
+        <div class="viz-bar" id="vb3"></div><div class="viz-bar" id="vb4"></div><div class="viz-bar" id="vb5"></div>
+        <div class="viz-bar" id="vb6"></div><div class="viz-bar" id="vb7"></div><div class="viz-bar" id="vb8"></div>
+        <div class="viz-bar" id="vb9"></div><div class="viz-bar" id="vb10"></div><div class="viz-bar" id="vb11"></div>
+      </div>
+
+      <div id="statusBadge" class="status-badge status-idle">
+        <span id="statusDot">⬜</span><span id="statusText">Ready</span>
+      </div>
+
+      <audio id="audioPlayer" controls style="display:none;"></audio>
+
+      <div class="btn-row">
+        <button id="recordBtn" class="btn btn-primary">🎙️ &nbsp;Start Recording</button>
+        <button id="stopBtn" class="btn btn-danger" disabled>⏹ &nbsp;Stop</button>
+        
+        <button id="fileSelectBtn" class="btn btn-amber">📁 &nbsp;Upload File</button>
+        <input type="file" id="audioFileInput" accept="audio/*" style="display:none;">
+
+        <button id="rerecordBtn" class="btn btn-dark" style="display:none;">↩ &nbsp;Reset</button>
+        <button id="uploadBtn" class="btn btn-green" style="display:none;">⬆ &nbsp;Submit Answer</button>
+      </div>
+      <div id="uploadFeedback" style="margin-top:14px; font-size:.88rem; color:var(--mid); display:none;"></div>
+    </div>
+  </div>
+
+  <div id="screen-done">
+    <div class="card fade-in">
+      <div class="done-hero">
+        <div class="check">✅</div>
+        <h2>Interview Complete</h2>
+        <p>Thank you for completing your pre-screen.</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const BACKEND_URL = "http://localhost:8001";
+const urlParams = new URLSearchParams(window.location.search);
+const SESSION_ID = urlParams.get('session_id'); // Removed default string
+
+let questions = [];
+let currentQ = 0;
+let mediaRecorder = null;
+let audioChunks = [];
+let audioBlob = null;
+let stream = null;
+let vizInterval = null;
+let analyserNode = null;
+let audioCtx = null;
+let isRecording = false;
+
+const screenConsent = document.getElementById('screen-consent');
+const screenInterview = document.getElementById('screen-interview');
+const screenDone = document.getElementById('screen-done');
+const consentCheck = document.getElementById('consentCheck');
+const acceptBtn = document.getElementById('acceptBtn');
+const progressLabel = document.getElementById('progressLabel');
+const progressFill = document.getElementById('progressFill');
+const qNumber = document.getElementById('qNumber');
+const qText = document.getElementById('qText');
+const speakBtn = document.getElementById('speakBtn');
+const ttsDot = document.getElementById('ttsDot');
+const ttsStatus = document.getElementById('ttsStatus');
+const recordBtn = document.getElementById('recordBtn');
+const stopBtn = document.getElementById('stopBtn');
+const rerecordBtn = document.getElementById('rerecordBtn');
+const uploadBtn = document.getElementById('uploadBtn');
+const fileSelectBtn = document.getElementById('fileSelectBtn');
+const audioFileInput = document.getElementById('audioFileInput');
+const audioPlayer = document.getElementById('audioPlayer');
+const statusBadge = document.getElementById('statusBadge');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const uploadFeedback = document.getElementById('uploadFeedback');
+const vizBars = Array.from({ length: 12 }, (_, i) => document.getElementById(`vb${i}`));
+
+consentCheck.addEventListener('change', () => { acceptBtn.disabled = !consentCheck.checked; });
+acceptBtn.addEventListener('click', async () => {
+  if (!SESSION_ID) {
+    alert("No Session ID found! You must start from the CV Upload page.");
+    return;
+  }
+  screenConsent.style.display = 'none';
+  screenInterview.style.display = 'block';
+  await loadQuestions();
+  renderQuestion();
+});
+
+async function loadQuestions() {
+  if (!SESSION_ID) { questions = defaultQuestions(); return; }
+  try {
+    const res = await fetch(`${BACKEND_URL}/get_questions?session_id=${SESSION_ID}`);
+    const data = await res.json();
+    questions = (data.questions && data.questions.length > 0) ? data.questions : defaultQuestions();
+  } catch { questions = defaultQuestions(); }
+}
+
+function defaultQuestions() {
+  return ["Tell us about yourself.", "Describe a project you worked on.", "Why do you want this role?"];
+}
+
+function renderQuestion() {
+  const total = questions.length;
+  const idx = currentQ;
+  qNumber.textContent = `Question ${idx + 1}`;
+  qText.textContent = questions[idx];
+  progressLabel.textContent = `Question ${idx + 1} of ${total}`;
+  progressFill.style.width = `${((idx + 1) / total) * 100}%`;
+  resetRecordingUI();
+}
+
+// TTS Logic
+speakBtn.addEventListener('click', () => {
+  window.speechSynthesis.cancel();
+  const utt = new SpeechSynthesisUtterance(questions[currentQ]);
+  utt.onstart = () => { ttsDot.classList.add('speaking'); ttsStatus.textContent = 'Reading...'; };
+  utt.onend = () => { ttsDot.classList.remove('speaking'); ttsStatus.textContent = 'Click to hear'; };
+  window.speechSynthesis.speak(utt);
+});
+
+// Recording Logic
+recordBtn.addEventListener('click', async () => {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyserNode = audioCtx.createAnalyser();
+    analyserNode.fftSize = 64;
+    audioCtx.createMediaStreamSource(stream).connect(analyserNode);
+
+    audioChunks = [];
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+    mediaRecorder.onstop = () => {
+      audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      showReviewUI('done', '✅', 'Recording saved');
+    };
+    mediaRecorder.start(100);
+    isRecording = true;
+    startViz();
+    setStatus('rec', '🔴', 'Recording...');
+    recordBtn.disabled = true;
+    stopBtn.disabled = false;
+    fileSelectBtn.disabled = true;
+  } catch { setStatus('error', '🚫', 'Mic access denied'); }
+});
+
+stopBtn.addEventListener('click', () => {
+  if (mediaRecorder) { mediaRecorder.stop(); stream.getTracks().forEach(t => t.stop()); isRecording = false; stopViz(); }
+  stopBtn.disabled = true;
+});
+
+// File Upload Logic
+fileSelectBtn.addEventListener('click', () => audioFileInput.click());
+audioFileInput.addEventListener('change', (e) => {
+  if (e.target.files.length > 0) {
+    audioBlob = e.target.files[0];
+    showReviewUI('done', '📂', 'File selected');
+    recordBtn.disabled = true;
+  }
+});
+
+function showReviewUI(type, dot, text) {
+  audioPlayer.src = URL.createObjectURL(audioBlob);
+  audioPlayer.style.display = 'block';
+  setStatus(type, dot, text);
+  uploadBtn.style.display = 'inline-flex';
+  rerecordBtn.style.display = 'inline-flex';
+}
+
+function resetRecordingUI() {
+  if (isRecording) stopBtn.click();
+  audioBlob = null;
+  audioChunks = [];
+  audioPlayer.style.display = 'none';
+  audioFileInput.value = '';
+  recordBtn.disabled = false;
+  fileSelectBtn.disabled = false;
+  uploadBtn.disabled = false;
+  uploadBtn.style.display = 'none';
+  rerecordBtn.style.display = 'none';
+  uploadFeedback.style.display = 'none';
+  setStatus('idle', '⬜', 'Ready');
+  stopViz();
+}
+
+rerecordBtn.addEventListener('click', resetRecordingUI);
+
+// Visualizer Helpers
+function startViz() {
+  const data = new Uint8Array(analyserNode.frequencyBinCount);
+  vizInterval = setInterval(() => {
+    analyserNode.getByteFrequencyData(data);
+    vizBars.forEach((bar, i) => bar.style.height = Math.max(6, (data[i]/255)*48) + 'px');
+  }, 60);
+}
+function stopViz() { clearInterval(vizInterval); vizBars.forEach(b => b.style.height = '6px'); }
+function setStatus(type, dot, text) { statusBadge.className = `status-badge status-${type}`; statusDot.textContent = dot; statusText.textContent = text; }
+
+// Final Submission (FIXED)
+uploadBtn.addEventListener('click', async () => {
+  if (!SESSION_ID) {
+    setStatus('error', '❌', 'Missing Session ID');
+    return;
+  }
+
+  uploadBtn.disabled = true;
+  setStatus('upload', '⬆', 'Uploading...');
+  const formData = new FormData();
+  
+  // FIXED: Using "question_index" to match backend/main.py
+  formData.append('audio', audioBlob, `q${currentQ + 1}.webm`);
+  formData.append('session_id', SESSION_ID);
+  formData.append('question_index', String(currentQ));
+  formData.append('question_text', questions[currentQ] || '');
+
+  try {
+    const res = await fetch(`${BACKEND_URL}/upload_answer`, { method: 'POST', body: formData });
+    
+    if (res.ok) {
+      currentQ++;
+      if (currentQ < questions.length) {
+          renderQuestion();
+      } else {
+          showDoneScreen();
+      }
+    } else {
+        // Parse error to see exactly what backend complains about
+        const errorData = await res.json();
+        throw new Error(errorData.detail || "Upload failed");
+    }
+  } catch (e) {
+    console.error(e);
+    setStatus('error', '❌', `Error: ${e.message}`);
+    uploadBtn.disabled = false;
+  }
+});
+
+function showDoneScreen() { screenInterview.style.display = 'none'; screenDone.style.display = 'block'; }
+</script>
+</body>
+</html>
