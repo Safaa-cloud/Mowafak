@@ -614,6 +614,7 @@ uploadBtn.addEventListener('click', async () => {
     
     if (res.ok) {
       currentQ++;
+      uploadBtn.disabled = false;
       if (currentQ < questions.length) {
           renderQuestion();
       } else {
