@@ -9,7 +9,7 @@
 **Crucially, Mowafak enforces a strict "Human-in-the-Loop" (HiL) policy: the system makes auto-rejection impossible by design.** Every AI recommendation must be reviewed and approved by a human HR professional.
 
 ## 🚀 Project Demo
-<video "https://github.com/Safaa-cloud/Mowafak/blob/main/Mowafak_Project_demo.mp4" controls="controls" style="max-width: 100%;"></video>
+<video src="https://github.com/Safaa-cloud/Mowafak/blob/main/Mowafak_Project_demo.mp4" controls="controls" style="max-width: 100%;"></video>
 ---
 
 ## 🌟 Key Features
