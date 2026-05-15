@@ -57,7 +57,7 @@ pip install -r requirements.txt
 **3. Configure Environment Variables:**
 Create a `.env` file in the root directory and add your API key:
 ```env
-GEMINI_API_KEY="AIzaSyC3vwKyLo_sPkGbmi6S2VAu6XmXsXCDp8M"
+GEMINI_API_KEY="your_google_ai_studio_key_here"
 ```
 
 ---
@@ -68,18 +68,18 @@ Because Mowafak is decoupled, you need to run the Backend and the HR UI simultan
 
 **Start the FastAPI Backend:**
 ```bash
-uvicorn backend.main:app --reload
-# Runs on http://localhost:8000
+uvicorn backend.main:app --reload --port 8001
+# Runs on http://localhost:8001
 ```
 
 **Start the Chainlit HR UI:**
 ```bash
-chainlit run app.py -w
+chainlit run app.py -w --port 8000
 # Runs on http://localhost:8000 (Chainlit port)
 ```
 
 **Launch the Candidate App:**
-Open `candidate_app/record.html` directly in any modern web browser.
+Open `candidate_app/index.html` in a modern browser, upload a PDF CV, accept consent, then continue to the generated `record.html?session_id=...` interview link.
 
 ---
 

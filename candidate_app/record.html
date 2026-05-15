@@ -573,6 +573,7 @@ function resetRecordingUI() {
   audioFileInput.value = '';
   recordBtn.disabled = false;
   fileSelectBtn.disabled = false;
+  uploadBtn.disabled = false;
   uploadBtn.style.display = 'none';
   rerecordBtn.style.display = 'none';
   uploadFeedback.style.display = 'none';
@@ -608,6 +609,7 @@ uploadBtn.addEventListener('click', async () => {
   formData.append('audio', audioBlob, `q${currentQ + 1}.webm`);
   formData.append('session_id', SESSION_ID);
   formData.append('question_index', String(currentQ));
+  formData.append('question_text', questions[currentQ] || '');
 
   try {
     const res = await fetch(`${BACKEND_URL}/upload_answer`, { method: 'POST', body: formData });

@@ -8,7 +8,7 @@ import json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.settings import settings          # single source of truth for DB path
-from src.audit_log import export_log_to_csv  # only import what we need here
+from src.audit_log import export_log_to_csv, log_decision
 
 
 # =============================================================================
@@ -31,33 +31,55 @@ def get_db_connection() -> sqlite3.Connection:
 # 2. HELPERS
 # =============================================================================
 
-async def process_decision(cand_id: str, decision: str, hr_notes: str = "None"):
+async def process_decision(
+    cand_id: str,
+    decision: str,
+    hr_notes: str = "",
+    hr_user_id: str = "hr_mariam",
+):
     """
     Updates the database when HR makes a decision.
 
-    FIX (Bug 6 — duplicate audit log):
-    The old version called log_decision() here AND main.py /hr_decision also
-    wrote to audit_log.jsonl — every decision was logged twice.
-    Now app.py ONLY updates the database.  The audit log is written exclusively
-    by main.py's /hr_decision endpoint, which is the single authoritative path.
-
-    If you later want Chainlit to bypass FastAPI entirely, move the audit write
-    back here and remove it from main.py — but never have both active at once.
+    Chainlit is an HR UI, so a button click is itself the explicit human action.
+    We update the report and append one signed audit entry here.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute(
         """
-        UPDATE reports
-        SET hr_decision = ?, hr_notes = ?
-        WHERE session_id = (SELECT id FROM sessions WHERE candidate_id = ?)
+        SELECT s.id AS session_id, r.ai_recommendation
+        FROM sessions s
+        JOIN reports r ON s.id = r.session_id
+        WHERE s.candidate_id = ?
         """,
-        (decision, hr_notes, cand_id),
+        (cand_id,),
+    )
+    row = cursor.fetchone()
+
+    if not row:
+        conn.close()
+        raise ValueError("No pending report found for this candidate.")
+
+    cursor.execute(
+        """
+        UPDATE reports
+        SET hr_decision = ?, hr_notes = ?, hr_user_id = ?, decided_at = datetime('now')
+        WHERE session_id = ?
+        """,
+        (decision, hr_notes, hr_user_id, row["session_id"]),
     )
 
     conn.commit()
     conn.close()
+
+    log_decision(
+        candidate_id=cand_id,
+        ai_recommendation=row["ai_recommendation"] or "pending",
+        hr_decision=decision,
+        hr_notes=hr_notes,
+        hr_user_id=hr_user_id,
+    )
 
 
 def format_ai_badge(ai_rec: str) -> str:
@@ -146,12 +168,13 @@ async def start():
     try:
         if row["report_json"]:
             report_data     = json.loads(row["report_json"])
-            overall_score   = report_data.get("overall_score", "N/A")
-            relevance_score = report_data.get("relevance_score", "N/A")
-            clarity_score   = report_data.get("clarity_score", "N/A")
-            tech_score      = report_data.get("technical_depth_score", "N/A")
-            evidence_quote  = report_data.get("evidence_from_transcript", "N/A")
-            concerns_list   = report_data.get("concerns", [])
+            overall_score = report_data.get("overall_score", "N/A")
+            first_assessment = (report_data.get("assessments") or [{}])[0]
+            relevance_score = first_assessment.get("relevance_score", report_data.get("relevance_score", "N/A"))
+            clarity_score = first_assessment.get("clarity_score", report_data.get("clarity_score", "N/A"))
+            tech_score = first_assessment.get("technical_depth_score", report_data.get("technical_depth_score", "N/A"))
+            evidence_quote = first_assessment.get("evidence_from_transcript", report_data.get("evidence_from_transcript", "N/A"))
+            concerns_list = first_assessment.get("concerns", report_data.get("concerns", []))
             if concerns_list:
                 concerns_text = "\n".join(f"- {c}" for c in concerns_list)
     except (json.JSONDecodeError, TypeError):
@@ -237,14 +260,17 @@ async def on_reject(action: cl.Action):
     res = await cl.AskUserMessage(
         content=(
             f"✍️ Please provide written feedback for rejecting candidate `{cand_id}`.\n"
-            f"*(This will be stored in the audit log and is required before rejection is finalised.)*"
+            f"*(This will be hashed in the audit log and is required before rejection is finalised.)*"
         ),
         timeout=120,
     ).send()
 
     feedback = res["output"].strip() if res else ""
     if not feedback:
-        feedback = "No specific feedback provided by HR."
+        await cl.Message(
+            content="❌ Rejection was not finalised because written HR feedback is required."
+        ).send()
+        return
 
     await finalize_decision(action, "Rejected", feedback)
 
@@ -257,7 +283,13 @@ async def finalize_decision(action: cl.Action, status: str, notes: str):
     cand_id = action.payload["value"]
 
     # Update the database (audit log is written by FastAPI — see process_decision docstring)
-    await process_decision(cand_id, status, notes)
+    decision_value = {
+        "Approved": "approve",
+        "Hold": "hold",
+        "Rejected": "reject",
+    }.get(status, status)
+
+    await process_decision(cand_id, decision_value, notes)
 
     # Remove the action buttons so HR cannot submit a second decision
     msg = cl.user_session.get("report_msg")

@@ -1,4 +1,4 @@
-timestamp,candidate_id,hr_notes,hr_decision,hr_user_id,verified_by,ai_recommendation
-2026-05-10T23:34:45.347837,CAND-001,,Approved,,HR_Manager_Mariam,strong
-2026-05-14T00:51:22.293185,TEST-123,"Perfect candidate, testing the system.",Approved,HR_Manager_Mariam,,strong
-2026-05-14T00:53:52.320262,TEST-123,"Perfect candidate, testing the system.",Approved,HR_Manager_Mariam,,strong
+timestamp,candidate_id,signature,hr_user_id,hr_notes_hash,hr_decision,ai_recommendation,previous_hash
+2026-05-15T16:24:31.773171,3e5fe3fa-d62d-4428-9cc9-06d497b91c3e,92c0b69f90f7a296949481b7abc75c97721cb43bc0158e8a0d0e9a9db1d21419,hr_mariam,f8383c8d7595ce36535ff529e3b8da9545a829cb60234d8dfe8a9926ca9537c9,hold,pending,
+2026-05-15T16:25:04.863172,1e1c4561-c525-4f04-a665-87f8289894dd,ed2f94d17c7ad55e7f227e43582d6e7c5cbbbda1b3527dfef177b43820a55aa6,hr_mariam,f8383c8d7595ce36535ff529e3b8da9545a829cb60234d8dfe8a9926ca9537c9,hold,weak_no,4a0206ca0beb5d0f47cb7b89b927666e8cb0059d085eb738b9c8c204f975bece
+2026-05-15T16:57:28.157967,859d3056-5580-4b9c-9405-f64a91758440,cfe58e19df75f893a4cbd9df0bbd1fc7ca15ff5c06f1c9940e77dc7632d2a2ed,hr_mariam,f8383c8d7595ce36535ff529e3b8da9545a829cb60234d8dfe8a9926ca9537c9,hold,weak_no,27c4284a3dc350db5ea4540931bb27a2cca8d1f3869eb1735a7d6904779fc394

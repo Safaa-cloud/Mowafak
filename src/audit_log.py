@@ -3,6 +3,7 @@ import json
 import csv
 from datetime import datetime
 import logging
+import hashlib
 
 # Configure logging for audit system operations
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - AUDIT - %(message)s')
@@ -30,15 +31,20 @@ def log_decision(candidate_id: str, ai_recommendation: str, hr_decision: str, hr
     This acts as an append-only ledger for compliance with Responsible AI standards.
     """
     jsonl_path, _ = get_log_paths()
-    
+    previous_hash = _last_entry_hash(jsonl_path)
+    hr_notes_hash = hashlib.sha256((hr_notes or "").encode("utf-8")).hexdigest()
+
     log_entry = {
         "timestamp": datetime.now().isoformat(),
         "candidate_id": candidate_id,
         "ai_recommendation": ai_recommendation,
         "hr_decision": hr_decision,
-        "hr_notes": hr_notes,
-        "hr_user_id": hr_user_id
+        "hr_user_id": hr_user_id,
+        "hr_notes_hash": hr_notes_hash,
+        "previous_hash": previous_hash,
     }
+    signature_payload = json.dumps(log_entry, sort_keys=True)
+    log_entry["signature"] = hashlib.sha256(signature_payload.encode("utf-8")).hexdigest()
 
     try:
         # 'a' mode ensures we only append, preventing accidental overwriting of past audits
@@ -47,6 +53,17 @@ def log_decision(candidate_id: str, ai_recommendation: str, hr_decision: str, hr
         logging.info(f"Audit log securely recorded for candidate '{candidate_id}'.")
     except Exception as e:
         logging.error(f"Critical System Error - Failed to write to audit log: {e}")
+
+
+def _last_entry_hash(jsonl_path: str) -> str:
+    if not os.path.exists(jsonl_path):
+        return ""
+    last_line = ""
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                last_line = line.strip()
+    return hashlib.sha256(last_line.encode("utf-8")).hexdigest() if last_line else ""
 
 def export_log_to_csv() -> str:
     """
@@ -64,6 +81,8 @@ def export_log_to_csv() -> str:
         all_headers = set()
         with open(jsonl_path, 'r', encoding="utf-8") as f_in:
             for line in f_in:
+                if not line.strip():
+                    continue
                 data = json.loads(line)
                 all_headers.update(data.keys())
         
@@ -78,6 +97,8 @@ def export_log_to_csv() -> str:
             writer.writeheader()
             
             for line in f_in:
+                if not line.strip():
+                    continue
                 data = json.loads(line)
                 writer.writerow(data)
                 

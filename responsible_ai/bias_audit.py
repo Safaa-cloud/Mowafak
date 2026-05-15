@@ -166,7 +166,8 @@ class BiasAuditor:
         for transcript_data in base_transcripts:
             base_name = transcript_data.get('base_name', 'Ahmed Hassan')
             # FIX #7: derive a stable per-base seed from the base_name string
-            name_seed = (seed or 0) + (hash(base_name) % 10_000)
+            stable_hash = int(hashlib.sha256(base_name.encode("utf-8")).hexdigest()[:8], 16)
+            name_seed = (seed or 0) + (stable_hash % 10_000)
             variants = self.name_generator.generate_variants(base_name, seed=name_seed)
 
             for category, variant in variants.items():
@@ -204,6 +205,7 @@ class BiasAuditor:
         evaluator=None,
     ) -> List[ScoreVariance]:
         """Run bias audit by evaluating same answers with different names."""
+        test_cases = self._coerce_test_cases(test_cases)
         if evaluator is None:
             from src.agents.response_evaluator import ResponseEvaluator
             evaluator = ResponseEvaluator()
@@ -277,6 +279,45 @@ class BiasAuditor:
             biased_groups=sum(1 for r in results if r.is_biased),
         )
         return results
+
+    def _coerce_test_cases(self, test_cases: List[Any]) -> List[BiasTestCase]:
+        """Accept native bias cases or DeepEval-style cases from the eval suite."""
+        coerced = []
+        for idx, case in enumerate(test_cases):
+            if isinstance(case, BiasTestCase):
+                coerced.append(case)
+                continue
+            transcript = ""
+            question = ""
+            if hasattr(case, "retrieval_context") and case.retrieval_context:
+                transcript = case.retrieval_context[0]
+            if hasattr(case, "input"):
+                question = case.input
+            metadata = getattr(case, "additional_metadata", {}) or {}
+            base_name = metadata.get("candidate_name", f"Candidate {idx + 1}")
+            if transcript:
+                coerced.extend(self.generate_test_cases([{
+                    "question_id": metadata.get("case_id", f"Q{idx + 1}"),
+                    "base_name": base_name,
+                    "question": question,
+                    "transcript": transcript,
+                }]))
+        return coerced
+
+    async def check_gender_bias(self) -> List[Dict[str, float]]:
+        """Offline gender-neutrality check used by local tests."""
+        report = self.run_quick_audit()
+        comparisons = []
+        for result in report.get("results", []):
+            scores = result.get("variant_scores", {})
+            male_scores = [score for key, score in scores.items() if key.startswith("male_")]
+            female_scores = [score for key, score in scores.items() if key.startswith("female_")]
+            if male_scores and female_scores:
+                comparisons.append({
+                    "male_variant_score": sum(male_scores) / len(male_scores),
+                    "female_variant_score": sum(female_scores) / len(female_scores),
+                })
+        return comparisons
 
     def generate_report(self, results: List[ScoreVariance]) -> BiasAuditReport:
         """Generate comprehensive bias audit report"""
@@ -468,7 +509,8 @@ class BiasAuditor:
 
         for key, cases in grouped.items():
             # FIX #5: seed once per group, not inside the per-case loop
-            group_rng = random.Random(hash(key) % 100_000)
+            group_seed = int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:8], 16)
+            group_rng = random.Random(group_seed % 100_000)
 
             variant_scores: Dict[str, float] = {}
 

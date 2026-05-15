@@ -5,7 +5,6 @@ from pydantic import BaseModel
 import asyncio
 import sqlite3
 import shutil
-import hashlib
 import uuid
 import json
 import os
@@ -20,6 +19,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from src.settings import settings
 from src.whisper_stt import transcribe_audio as real_whisper_transcribe
+from src.audit_log import log_decision
 
 
 # =============================================================================
@@ -87,7 +87,6 @@ def init_db():
         """
     )
 
-    # FIX (Bug 3): added question_text column so the evaluator agent always
     # has the original question alongside the transcript.
 
     cursor.execute(
@@ -103,6 +102,10 @@ def init_db():
             decided_at          TEXT
         )
         """
+    )
+
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_reports_session_id ON reports(session_id)"
     )
 
     conn.commit()
@@ -149,6 +152,76 @@ def _transcribe_sync(audio_path: str) -> str:
     return real_whisper_transcribe(audio_path)
 
 
+def _default_skills_matrix() -> dict:
+    return {
+        "required_skills": ["Python", "Machine Learning", "SQL"],
+        "nice_to_have_skills": ["TensorFlow", "Docker"],
+    }
+
+
+def _json_model(model) -> str:
+    return model.model_dump_json() if hasattr(model, "model_dump_json") else json.dumps(model.dict())
+
+
+async def maybe_generate_report(session_id: str):
+    """Generate the HR report once all stored questions have an answer."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT questions_json FROM sessions WHERE id=?", (session_id,))
+        session_row = cursor.fetchone()
+        if not session_row or not session_row["questions_json"]:
+            return
+
+        questions = json.loads(session_row["questions_json"])
+        cursor.execute(
+            """
+            SELECT question_index, question_text, transcript
+            FROM answers
+            WHERE session_id=?
+            ORDER BY question_index ASC
+            """,
+            (session_id,),
+        )
+        answer_rows = cursor.fetchall()
+    finally:
+        conn.close()
+
+    answered_indices = {row["question_index"] for row in answer_rows if row["transcript"]}
+    if len(answered_indices) < len(questions):
+        return
+
+    def build_report_sync():
+        from src.agents.question_generator import SkillsMatrix
+        from src.agents.response_evaluator import evaluate_response
+        from src.report_generator import generate_report
+        from src.orchestrator import save_to_db
+
+        matrix = SkillsMatrix(**_default_skills_matrix())
+        assessments = []
+        for row in answer_rows:
+            idx = row["question_index"]
+            question = row["question_text"] or (questions[idx] if idx < len(questions) else "")
+            assessment = evaluate_response(row["transcript"], matrix, question)
+            if assessment:
+                assessments.append(assessment)
+
+        report = generate_report(assessments, matrix)
+        if report:
+            save_to_db(session_id, report)
+            report_conn = get_db_connection()
+            try:
+                report_conn.execute(
+                    "UPDATE sessions SET status='awaiting_hr' WHERE id=?",
+                    (session_id,),
+                )
+                report_conn.commit()
+            finally:
+                report_conn.close()
+
+    await asyncio.to_thread(build_report_sync)
+
+
 # =============================================================================
 # PYDANTIC MODELS
 # =============================================================================
@@ -181,8 +254,6 @@ app = FastAPI(
 # =============================================================================
 # CORS
 # =============================================================================
-
-# FIX (Bug 1): original config only listed localhost:8000 (Chainlit).
 # record.html is a static file — when opened via file:// its origin is "null".
 # When served via Live Server or another local server it uses a different port.
 # Added "null" and common dev-server ports so candidate POSTs are not blocked.
@@ -268,6 +339,14 @@ async def upload_cv(
             (session_id, candidate_id, now),
         )
 
+        cursor.execute(
+            """
+            INSERT INTO reports (id, session_id, hr_decision)
+            VALUES (?, ?, 'pending')
+            """,
+            (f"report_{session_id}", session_id),
+        )
+
         conn.commit()
 
     except sqlite3.Error:
@@ -275,6 +354,25 @@ async def upload_cv(
 
     finally:
         conn.close()
+
+    # Trigger orchestrator automatically in background
+    async def run_orchestrator_bg():
+        from src.orchestrator import orchestrator_app
+        initial_state = {
+            "candidate_id": candidate_id,
+            "session_id": session_id,
+            "cv_path": str(upload_path),
+            "skills_matrix": _default_skills_matrix(),
+            "cv_data": {},
+            "questions": [],
+            "transcripts": [],
+            "assessments": [],
+            "final_report": {},
+            "status": ""
+        }
+        await asyncio.to_thread(orchestrator_app.invoke, initial_state)
+
+    asyncio.create_task(run_orchestrator_bg())
 
     return {
         "message":      "CV uploaded successfully.",
@@ -318,7 +416,7 @@ async def start_interview(
 
 
 # =============================================================================
-# GET QUESTIONS  (FIX — Bug 2: this endpoint was completely missing)
+# GET QUESTIONS  
 # =============================================================================
 
 @app.get("/get_questions")
@@ -443,6 +541,8 @@ async def upload_answer(
     finally:
         conn.close()
 
+    await maybe_generate_report(session_id)
+
     return {
         "message":    "Answer uploaded successfully.",
         "answer_id":  answer_id,
@@ -476,7 +576,7 @@ async def get_report(session_id: str):
 
 
 # =============================================================================
-# HR DECISION  (single audit log write — no duplicate with app.py)
+# HR DECISION
 # =============================================================================
 
 @app.post("/hr_decision")
@@ -485,9 +585,9 @@ async def hr_decision(request: HRDecisionRequest):
     Records the HR decision in the database and writes ONE signed entry to the
     append-only audit log.
 
-    This is the ONLY place the audit log is written.  app.py (Chainlit) updates
-    the database directly via process_decision() but does NOT call log_decision(),
-    avoiding the double-logging bug that existed before.
+    Chainlit can record HR actions directly through app.py. API callers can use
+    this endpoint; both paths use src.audit_log.log_decision for the same signed
+    append-only format.
     """
     allowed = {"approve", "reject", "hold"}
 
@@ -543,23 +643,14 @@ async def hr_decision(request: HRDecisionRequest):
     finally:
         conn.close()
 
-    candidate_id  = session_row["candidate_id"] if session_row else "unknown"
-    hr_notes_hash = hashlib.sha256(
-        (request.hr_notes or "").encode("utf-8")
-    ).hexdigest()
-
-    audit_entry = {
-        "timestamp":         now,
-        "candidate_id":      candidate_id,
-        "session_id":        request.session_id,
-        "ai_recommendation": ai_recommendation,
-        "hr_decision":       request.decision,
-        "hr_user_id":        request.hr_user_id,
-        "hr_notes_hash":     hr_notes_hash,
-    }
-
-    with open(settings.AUDIT_LOG_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps(audit_entry) + "\n")
+    candidate_id = session_row["candidate_id"] if session_row else "unknown"
+    log_decision(
+        candidate_id=candidate_id,
+        ai_recommendation=ai_recommendation,
+        hr_decision=request.decision,
+        hr_notes=request.hr_notes or "",
+        hr_user_id=request.hr_user_id,
+    )
 
     return {
         "message":    f"HR decision '{request.decision}' recorded.",

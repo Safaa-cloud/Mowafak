@@ -1,17 +1,13 @@
 import sqlite3
-import os
 import logging
+from src.settings import settings
 
 # Configure logging for security and audit trailing
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - HiL GATE - %(levelname)s - %(message)s')
 
 def get_db_connection() -> sqlite3.Connection:
     """Establish a secure connection to the central SQLite database."""
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(current_dir)
-    db_path = os.path.join(project_root, 'data', 'mowafak.db')
-    
-    return sqlite3.connect(db_path)
+    return sqlite3.connect(settings.DATABASE_URL)
 
 def verify_hil_clearance(candidate_id: str) -> bool:
     """
@@ -38,7 +34,7 @@ def verify_hil_clearance(candidate_id: str) -> bool:
             return False
         
         decision = row[0]
-        if decision in ["approve", "reject", "Approved", "Rejected"]: # Adjusted to match both backend/UI formats
+        if decision in ["approve", "reject", "Approved", "Rejected"]:
             logging.info(f"Cleared: Candidate '{candidate_id}' has an explicit HR decision: {decision}.")
             return True
         else:
@@ -79,3 +75,13 @@ def get_final_feedback(candidate_id: str) -> dict:
         "final_status": row[0],
         "hr_feedback": row[1] if row[1] else "No specific feedback provided by HR."
     }
+
+
+class HILGate:
+    """Compatibility wrapper with the same strict clearance behavior."""
+
+    def verify_clearance(self, candidate_id: str) -> bool:
+        return verify_hil_clearance(candidate_id)
+
+    def get_final_feedback(self, candidate_id: str) -> dict:
+        return get_final_feedback(candidate_id)
