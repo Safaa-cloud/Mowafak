@@ -1,0 +1,159 @@
+body {
+
+    font-family: Arial, sans-serif;
+
+    background-color: #f4f7fb;
+
+    margin: 0;
+
+    padding: 40px;
+
+}
+
+.container {
+
+    max-width: 800px;
+
+    margin: auto;
+
+}
+
+h1 {
+
+    text-align: center;
+
+    color: #1e293b;
+
+    margin-bottom: 30px;
+
+    font-size: 36px;
+
+    font-weight: bold;
+
+}
+
+.card {
+
+    background: white;
+
+    padding: 25px;
+
+    margin-bottom: 25px;
+
+    border-radius: 16px;
+
+    box-shadow: 0px 4px 15px rgba(0,0,0,0.08);
+
+}
+
+h2 {
+
+    color: #0f172a;
+
+    margin-top: 0;
+
+    font-weight: bold;
+
+}
+
+p {
+
+    color: #475569;
+
+    line-height: 1.7;
+
+}
+
+button {
+
+    border: none;
+
+    padding: 12px 18px;
+
+    border-radius: 10px;
+
+    cursor: pointer;
+
+    font-size: 15px;
+
+    font-weight: bold;
+
+    margin-right: 10px;
+
+    margin-top: 10px;
+
+    transition: 0.3s;
+
+}
+
+button:hover {
+
+    transform: scale(1.03);
+
+}
+
+#acceptBtn {
+
+    background-color: #16a34a;
+
+    color: white;
+
+}
+
+#recordBtn {
+
+    background-color: #2563eb;
+
+    color: white;
+
+}
+
+#stopBtn {
+
+    background-color: #dc2626;
+
+    color: white;
+
+}
+
+#uploadBtn {
+
+    background-color: #0f172a;
+
+    color: white;
+
+}
+
+#downloadBtn {
+
+    background-color: #7c3aed;
+
+    color: white;
+
+}
+
+audio {
+
+    width: 100%;
+
+    margin-top: 15px;
+
+}
+
+#status {
+
+    margin-top: 15px;
+
+    font-weight: bold;
+
+    color: #2563eb;
+
+}
+
+#progressText {
+
+    font-weight: bold;
+
+    color: #2563eb;
+
+}
